@@ -16,10 +16,13 @@
 package androidx.media3.demo.composition
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build.VERSION.SDK_INT
 import android.os.Bundle
 import android.os.LocaleList
@@ -27,8 +30,10 @@ import android.view.SurfaceView
 import android.view.View.INVISIBLE
 import android.view.View.VISIBLE
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -36,8 +41,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.draggable2D
-import androidx.compose.foundation.gestures.rememberDraggable2DState
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -100,6 +104,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -299,7 +305,9 @@ class CompositionPreviewActivity : AppCompatActivity() {
           DraggableOverlay(
             bitmap = placementState.overlay.bitmap,
             offset = placementState.currentUiTransformOffset,
+            scale = placementState.currentScale,
             onDrag = { dragAmount -> viewModel.onOverlayDrag(dragAmount) },
+            onScale = { scaleFactor -> viewModel.onOverlayScale(scaleFactor) },
             modifier = Modifier.size(width = maxWidth, height = maxHeight),
           )
         }
@@ -340,6 +348,7 @@ class CompositionPreviewActivity : AppCompatActivity() {
             onPlaceNewOverlay = { asset -> viewModel.onPlaceNewOverlayClicked(asset) },
             onEditOverlay = { id -> viewModel.onPlaceExistingOverlayClicked(id) },
             onRemoveOverlay = { id -> viewModel.removeOverlay(id) },
+            onStickerCreated = { uri -> viewModel.onStickerCreated(uri) },
           )
         }
 
@@ -412,18 +421,28 @@ class CompositionPreviewActivity : AppCompatActivity() {
   private fun DraggableOverlay(
     bitmap: Bitmap,
     offset: Offset,
+    scale: Float,
     onDrag: (Offset) -> Unit,
+    onScale: (Float) -> Unit,
     modifier: Modifier = Modifier,
   ) {
     Box(
       modifier =
-        modifier.clipToBounds().draggable2D(state = rememberDraggable2DState { onDrag(it) })
+        modifier
+          .clipToBounds()
+          .pointerInput(Unit) {
+            detectTransformGestures { _, pan, zoom, _ ->
+              onDrag(pan)
+              onScale(zoom)
+            }
+          }
     ) {
       Image(
         bitmap = bitmap.asImageBitmap(),
         contentDescription = stringResource(R.string.overlay_preview),
         modifier =
           Modifier.offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
+            .graphicsLayer(scaleX = scale, scaleY = scale)
             .wrapContentSize(align = Alignment.TopStart, unbounded = true),
       )
     }
@@ -435,8 +454,20 @@ class CompositionPreviewActivity : AppCompatActivity() {
     onPlaceNewOverlay: (OverlayAsset) -> Unit,
     onEditOverlay: (UUID) -> Unit,
     onRemoveOverlay: (UUID) -> Unit,
+    onStickerCreated: (Uri) -> Unit,
   ) {
     var showAssetSelectionDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val stickerLauncher = rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+      if (result.resultCode == Activity.RESULT_OK) {
+        result.data?.data?.let { uri ->
+          onStickerCreated(uri)
+        }
+      }
+    }
 
     if (showAssetSelectionDialog) {
       AssetSelectionDialog(
@@ -487,11 +518,21 @@ class CompositionPreviewActivity : AppCompatActivity() {
 
       HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.secondary)
 
-      ElevatedButton(
-        onClick = { showAssetSelectionDialog = true },
+      Row(
         modifier = Modifier.padding(top = MaterialTheme.spacing.small),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.small)
       ) {
-        Text(stringResource(R.string.add_new_overlay))
+        ElevatedButton(onClick = { showAssetSelectionDialog = true }) {
+          Text(stringResource(R.string.add_new_overlay))
+        }
+        ElevatedButton(
+          onClick = {
+            val intent = Intent(context, StickerCreationActivity::class.java)
+            stickerLauncher.launch(intent)
+          }
+        ) {
+          Text(stringResource(R.string.create_custom_overlay))
+        }
       }
     }
   }

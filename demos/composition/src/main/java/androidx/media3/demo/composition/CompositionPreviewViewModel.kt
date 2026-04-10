@@ -18,7 +18,9 @@ package androidx.media3.demo.composition
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
@@ -79,10 +81,15 @@ import com.google.common.base.Stopwatch
 import com.google.common.base.Ticker
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
@@ -197,6 +204,18 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
         overlayState = currentState.overlayState.copy(availableOverlays = initialPlaceableEffects),
       )
     }
+
+    viewModelScope.launch {
+      val stickers = loadStickers()
+      if (stickers.isNotEmpty()) {
+        _uiState.update { currentState ->
+          val updatedOverlays = currentState.overlayState.availableOverlays + stickers
+          currentState.copy(
+            overlayState = currentState.overlayState.copy(availableOverlays = updatedOverlays)
+          )
+        }
+      }
+    }
   }
 
   override fun onCleared() {
@@ -204,6 +223,54 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     releaseAndRecreatePlayer()
     cancelExport()
     exportStopwatch.reset()
+  }
+
+  private suspend fun loadStickers(): List<OverlayAsset> =
+    withContext(Dispatchers.IO) {
+      val stickers = mutableListOf<OverlayAsset>()
+      val projection =
+        arrayOf(
+          MediaStore.Images.Media._ID,
+          MediaStore.Images.Media.DISPLAY_NAME,
+          MediaStore.Images.Media.RELATIVE_PATH,
+        )
+      val selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+      val selectionArgs = arrayOf("Pictures/Stickers%")
+      val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+      getApplication<Application>()
+        .contentResolver
+        .query(
+          MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+          projection,
+          selection,
+          selectionArgs,
+          sortOrder,
+        )
+        ?.use { cursor ->
+          val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+          val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+
+          while (cursor.moveToNext()) {
+            val id = cursor.getLong(idColumn)
+            val name = cursor.getString(nameColumn)
+            val contentUri =
+              Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+            stickers.add(OverlayAsset(name = name, uri = contentUri.toString()))
+          }
+        }
+      return@withContext stickers
+    }
+
+  fun onStickerCreated(uri: Uri) {
+    val stickerName = "Sticker " + SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+    val newSticker = OverlayAsset(stickerName, uri = uri.toString())
+    _uiState.update { currentState ->
+      val updatedOverlays = currentState.overlayState.availableOverlays + newSticker
+      currentState.copy(
+        overlayState = currentState.overlayState.copy(availableOverlays = updatedOverlays)
+      )
+    }
   }
 
   fun onSnackbarMessageShown() {
@@ -276,28 +343,42 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
   }
 
   fun placeNewOverlay(asset: OverlayAsset) {
-    viewModelScope.launch(Dispatchers.IO) {
-      try {
-        val inputStream = getApplication<Application>().assets.open(asset.assetPath)
-        val previewBitmap = BitmapFactory.decodeStream(inputStream)
-        withContext(Dispatchers.Main) {
-          val newOverlay = PlacedOverlay(assetName = asset.name, bitmap = previewBitmap)
-          _uiState.update {
-            it.copy(
-              overlayState =
-                it.overlayState.copy(
-                  placementState = PlacementState.Placing(newOverlay, Offset.Zero)
-                )
-            )
+    viewModelScope.launch {
+      val previewBitmap: Bitmap? =
+        withContext(Dispatchers.IO) {
+          try {
+            if (asset.bitmap != null) {
+              return@withContext asset.bitmap
+            }
+            if (asset.assetPath != null) {
+              val inputStream = getApplication<Application>().assets.open(asset.assetPath)
+              return@withContext BitmapFactory.decodeStream(inputStream)
+            }
+            if (asset.uri != null) {
+              val inputStream =
+                getApplication<Application>()
+                  .contentResolver
+                  .openInputStream(Uri.parse(asset.uri))
+              return@withContext BitmapFactory.decodeStream(inputStream)
+            }
+            return@withContext null
+          } catch (e: IOException) {
+            Log.e(TAG, "Error loading overlay bitmap", e)
+            return@withContext null
           }
         }
-      } catch (e: IOException) {
-        Log.e(TAG, "Error loading overlay bitmap from assets", e)
-        withContext(Dispatchers.Main) {
-          _uiState.update { currentState ->
-            currentState.copy(snackbarMessage = "Could not load overlay image.")
-          }
-        }
+
+      if (previewBitmap == null) {
+        _uiState.update { it.copy(snackbarMessage = "Could not load overlay image.") }
+        return@launch
+      }
+
+      val newOverlay = PlacedOverlay(assetName = asset.name, bitmap = previewBitmap)
+      _uiState.update {
+        it.copy(
+          overlayState =
+            it.overlayState.copy(placementState = PlacementState.Placing(newOverlay, Offset.Zero, 1f))
+        )
       }
     }
   }
@@ -323,7 +404,7 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
       val newCommittedOverlays =
         currentState.overlayState.committedOverlays.filter { it.id != overlayId }
 
-      val newPlacementState = PlacementState.Placing(overlayToEdit, overlayToEdit.uiTransformOffset)
+      val newPlacementState = PlacementState.Placing(overlayToEdit, overlayToEdit.uiTransformOffset, overlayToEdit.scale)
 
       currentState.copy(
         overlayState =
@@ -342,18 +423,11 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
           ?: return@update currentState
 
       val overlayBitmap = currentPlacement.overlay.bitmap
+      val renderSize = currentState.outputSettingsState.renderSize
+      val scale = currentPlacement.currentScale
+      
       val newOffset = currentPlacement.currentUiTransformOffset + dragAmount
-      val clampedX =
-        newOffset.x.coerceIn(
-          0f,
-          currentState.outputSettingsState.renderSize.width - overlayBitmap.width,
-        )
-      val clampedY =
-        newOffset.y.coerceIn(
-          0f,
-          currentState.outputSettingsState.renderSize.height - overlayBitmap.height,
-        )
-      val finalOffset = Offset(clampedX, clampedY)
+      val finalOffset = calculateClampedOffset(overlayBitmap, renderSize, newOffset, scale)
 
       currentState.copy(
         overlayState =
@@ -362,10 +436,66 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
               PlacementState.Placing(
                 overlay = currentPlacement.overlay,
                 currentUiTransformOffset = finalOffset,
+                currentScale = currentPlacement.currentScale,
               )
           )
       )
     }
+  }
+
+  fun onOverlayScale(scaleFactor: Float) {
+    _uiState.update { currentState ->
+      val currentPlacement =
+        currentState.overlayState.placementState as? PlacementState.Placing
+          ?: return@update currentState
+
+      val newScale = (currentPlacement.currentScale * scaleFactor).coerceIn(0.1f, 5.0f)
+      
+      val overlayBitmap = currentPlacement.overlay.bitmap
+      val renderSize = currentState.outputSettingsState.renderSize
+      val currentOffset = currentPlacement.currentUiTransformOffset
+      
+      val finalOffset = calculateClampedOffset(overlayBitmap, renderSize, currentOffset, newScale)
+
+      currentState.copy(
+        overlayState =
+          currentState.overlayState.copy(
+            placementState =
+              PlacementState.Placing(
+                overlay = currentPlacement.overlay,
+                currentUiTransformOffset = finalOffset,
+                currentScale = newScale,
+              )
+          )
+      )
+    }
+  }
+
+  private fun calculateClampedOffset(
+      bitmap: Bitmap,
+      renderSize: geometrySize,
+      offset: Offset,
+      scale: Float
+  ): Offset {
+      val width = bitmap.width.toFloat()
+      val height = bitmap.height.toFloat()
+      
+      // Calculate bounds for X
+      val boundX1 = (width / 2f) * (scale - 1f)
+      val boundX2 = renderSize.width - (width / 2f) * (1f + scale)
+      val minX = min(boundX1, boundX2)
+      val maxX = max(boundX1, boundX2)
+      
+      // Calculate bounds for Y
+      val boundY1 = (height / 2f) * (scale - 1f)
+      val boundY2 = renderSize.height - (height / 2f) * (1f + scale)
+      val minY = min(boundY1, boundY2)
+      val maxY = max(boundY1, boundY2)
+      
+      val clampedX = offset.x.coerceIn(minX, maxX)
+      val clampedY = offset.y.coerceIn(minY, maxY)
+      
+      return Offset(clampedX, clampedY)
   }
 
   fun onEndPlacementClicked() {
@@ -388,9 +518,11 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
             createBitmapOverlay(
               currentPlacement.overlay.bitmap,
               currentPlacement.currentUiTransformOffset,
+              currentPlacement.currentScale,
               currentState.outputSettingsState.renderSize,
             ),
           uiTransformOffset = currentPlacement.currentUiTransformOffset,
+          scale = currentPlacement.currentScale
         )
       val newCommittedOverlays = currentState.overlayState.committedOverlays + finalOverlay
       currentState.copy(
@@ -406,14 +538,13 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
   private fun createBitmapOverlay(
     bitmap: Bitmap,
     transformOffset: Offset,
+    scale: Float,
     renderSize: geometrySize,
   ): BitmapOverlay {
     if (renderSize == geometrySize.Zero) {
       return BitmapOverlay.createStaticBitmapOverlay(bitmap)
     }
 
-    // Converts the bitmap's center from UI pixel coordinates (origin at top-left) to the normalized
-    // [-1, 1] coordinate space anchors (origin at the center) that the overlay requires.
     val boxCenterXpx = transformOffset.x + (bitmap.width / 2f)
     val boxCenterYpx = transformOffset.y + (bitmap.height / 2f)
 
@@ -421,7 +552,10 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     val anchorY = 1f - (boxCenterYpx / renderSize.height) * 2f
 
     val overlaySettings =
-      StaticOverlaySettings.Builder().setBackgroundFrameAnchor(anchorX, anchorY).build()
+      StaticOverlaySettings.Builder()
+        .setBackgroundFrameAnchor(anchorX, anchorY)
+        .setScale(scale, scale)
+        .build()
     return BitmapOverlay.createStaticBitmapOverlay(bitmap, overlaySettings)
   }
 

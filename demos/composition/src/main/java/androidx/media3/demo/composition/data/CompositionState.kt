@@ -36,6 +36,7 @@ import java.util.UUID
  * @param overlayState The state for draggable overlay management.
  * @param outputSettingsState The state for all output settings.
  * @param exportState The state for the current export process.
+ * @param stickerState The state for creating custom stickers via segmentation.
  */
 @UnstableApi
 data class CompositionPreviewState(
@@ -47,6 +48,7 @@ data class CompositionPreviewState(
   val overlayState: OverlayState,
   val outputSettingsState: OutputSettingsState,
   val exportState: ExportState,
+  val stickerState: StickerState = StickerState(),
 )
 
 /**
@@ -101,6 +103,7 @@ data class OverlayState(
  * @param bitmap The actual bitmap content of the overlay.
  * @param overlay The Media3 [BitmapOverlay] object used by the player/transformer.
  * @param uiTransformOffset The current top-left offset of the overlay in UI pixel coordinates.
+ * @param scale The current scale of the overlay.
  */
 @UnstableApi
 data class PlacedOverlay(
@@ -109,6 +112,7 @@ data class PlacedOverlay(
   val bitmap: Bitmap,
   var overlay: BitmapOverlay? = null,
   var uiTransformOffset: Offset = Offset.Zero,
+  var scale: Float = 1f,
 )
 
 /**
@@ -118,8 +122,15 @@ data class PlacedOverlay(
  *
  * @param name The display name of the asset.
  * @param assetPath The path to the asset within the application's assets folder.
+ * @param bitmap Optional bitmap if the asset was dynamically created (like a custom sticker).
+ * @param uri Optional URI string if the asset is loaded from storage (e.g. MediaStore).
  */
-data class OverlayAsset(val name: String, val assetPath: String)
+data class OverlayAsset(
+  val name: String,
+  val assetPath: String? = null,
+  val bitmap: Bitmap? = null,
+  val uri: String? = null,
+)
 
 /** A sealed interface to model the different states of the overlay placement UI. */
 @UnstableApi
@@ -135,9 +146,13 @@ sealed interface PlacementState {
    *   gesture. We use this instead of the existing [PlacedOverlay.uiTransformOffset], as we only
    *   want to updated the [PlacedOverlay] once after the whole drag process is completed and not on
    *   every drag input.
+   * @param currentScale The current scale of the overlay during a pinch gesture.
    */
-  data class Placing(val overlay: PlacedOverlay, val currentUiTransformOffset: Offset) :
-    PlacementState
+  data class Placing(
+    val overlay: PlacedOverlay,
+    val currentUiTransformOffset: Offset,
+    val currentScale: Float = 1f,
+  ) : PlacementState
 }
 
 /**
@@ -170,3 +185,18 @@ data class OutputSettingsState(
  * @param exportResultInfo A message describing the result of the export.
  */
 data class ExportState(val isExporting: Boolean = false, val exportResultInfo: String? = null)
+
+/**
+ * Holds the state for the custom sticker creation process using Interactive Segmentation.
+ *
+ * @param isStickerModeActive True if the user is currently in the process of creating a sticker.
+ * @param capturedFrame The bitmap frame captured from the video for segmentation.
+ * @param segmentedSticker The resulting sticker bitmap after segmentation.
+ * @param isSegmenting True if the segmentation process is currently running.
+ */
+data class StickerState(
+  val isStickerModeActive: Boolean = false,
+  val capturedFrame: Bitmap? = null,
+  val segmentedSticker: Bitmap? = null,
+  val isSegmenting: Boolean = false,
+)

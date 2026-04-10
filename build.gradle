@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 buildscript {
+    ext {
+        agp_version = '9.0.0'
+        agp_version1 = '8.13.2'
+    }
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.12.3'
+        classpath "com.android.tools.build:gradle:$agp_version1"
         classpath 'com.google.android.gms:strict-version-matcher-plugin:1.2.4'
         classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.20'
         classpath 'org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.0.20'
