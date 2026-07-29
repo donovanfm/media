@@ -16,10 +16,14 @@
 package androidx.media3.demo.effect
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import androidx.annotation.OptIn
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.AndroidViewModel
@@ -27,6 +31,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
@@ -34,6 +39,8 @@ import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
 import com.google.common.collect.ImmutableList
+import java.io.IOException
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,9 +76,14 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
 
   private var lottieOverlayOptions: Map<String, Effect> = emptyMap()
 
+  // Decoded sticker bitmaps keyed by display name; names are published via EffectUiState while
+  // the heavyweight bitmaps stay here (same idiom as lottieOverlayOptions).
+  private var stickerBitmaps: Map<String, Bitmap> = emptyMap()
+
   init {
     loadPlaylists()
     loadLottieEffects()
+    loadStickerAssets()
   }
 
   private fun loadPlaylists() {
@@ -122,6 +134,40 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             getApplication<Application>().getString(R.string.lottie_effect_name_counter),
           lottieEffectsLoaded = true,
         )
+      }
+    }
+  }
+
+  private fun loadStickerAssets() {
+    viewModelScope.launch {
+      try {
+        val bitmaps =
+          withContext(Dispatchers.IO) {
+            val resources = getApplication<Application>().resources
+            val names = resources.getStringArray(R.array.sticker_asset_names)
+            val paths = resources.getStringArray(R.array.sticker_asset_paths)
+            buildMap {
+              for (i in names.indices) {
+                getApplication<Application>().assets.open(paths[i]).use { stream ->
+                  BitmapFactory.decodeStream(stream)?.let { put(names[i], it) }
+                }
+              }
+            }
+          }
+        stickerBitmaps = bitmaps
+        _uiState.update {
+          it.copy(
+            stickerAssetNames = ImmutableList.copyOf(bitmaps.keys),
+            selectedStickerAssetName = bitmaps.keys.firstOrNull(),
+            stickerAssetsLoaded = bitmaps.isNotEmpty(),
+          )
+        }
+      } catch (e: IOException) {
+        _uiState.update {
+          it.copy(
+            errorMessage = getApplication<Application>().getString(R.string.sticker_loading_error)
+          )
+        }
       }
     }
   }
@@ -242,6 +288,186 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
+   * Toggles whether placed sticker overlays are included in the applied effects.
+   *
+   * @param checked Whether the sticker overlay checkbox is checked.
+   */
+  fun updateStickerChecked(checked: Boolean) {
+    _uiState.update { it.copy(stickerOverlayChecked = checked, effectsChanged = true) }
+  }
+
+  /**
+   * Updates the selected sticker asset in the UI controls. Selection alone doesn't change the
+   * applied effects; it only chooses what the next placement uses.
+   *
+   * @param name The display name of the sticker asset.
+   */
+  fun updateStickerAssetName(name: String) {
+    _uiState.update { it.copy(selectedStickerAssetName = name) }
+  }
+
+  /**
+   * Records the measured size of the player box so placement can compute the video content rect.
+   *
+   * @param size The size of the player box in pixels.
+   */
+  fun updatePlayerBoxSize(size: Size) {
+    _uiState.update { it.copy(playerBoxSize = size) }
+  }
+
+  /**
+   * Enters placement mode for the currently selected sticker asset: pauses playback and shows a
+   * draggable preview centered over the video.
+   */
+  fun startStickerPlacement() {
+    val currentState = _uiState.value
+    if (currentState.stickerPlacement is StickerPlacement.Placing) {
+      return
+    }
+    val assetName = currentState.selectedStickerAssetName ?: return
+    val bitmap = stickerBitmaps[assetName] ?: return
+    exoPlayer.pause()
+    val videoSize = exoPlayer.videoSize
+    val contentRect =
+      StickerGeometry.videoContentRect(
+        currentState.playerBoxSize,
+        videoSize.width,
+        videoSize.height,
+        videoSize.pixelWidthHeightRatio,
+      )
+    _uiState.update {
+      it.copy(
+        stickerPlacement =
+          StickerPlacement.Placing(
+            original = null,
+            assetName = assetName,
+            bitmap = bitmap,
+            transform =
+              StickerGeometry.centeredTransform(bitmap.width, bitmap.height, contentRect.size),
+            contentRect = contentRect,
+            videoPixelWidth = videoSize.width,
+          )
+      )
+    }
+  }
+
+  /**
+   * Re-enters placement mode for a committed sticker, restoring its transform so it can be moved,
+   * rescaled, or cancelled back to its original position.
+   *
+   * @param id The [PlacedSticker.id] of the sticker to edit.
+   */
+  fun editPlacedSticker(id: UUID) {
+    val currentState = _uiState.value
+    if (currentState.stickerPlacement is StickerPlacement.Placing) {
+      return
+    }
+    val sticker = currentState.placedStickers.find { it.id == id } ?: return
+    exoPlayer.pause()
+    _uiState.update {
+      it.copy(
+        placedStickers =
+          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id }),
+        stickerPlacement =
+          StickerPlacement.Placing(
+            original = sticker,
+            assetName = sticker.assetName,
+            bitmap = sticker.bitmap,
+            transform = sticker.transform,
+            contentRect = sticker.contentRect,
+            videoPixelWidth = sticker.videoPixelWidth,
+          ),
+      )
+    }
+  }
+
+  /**
+   * Applies one pan+zoom gesture event to the sticker being placed. Pan and zoom from the same
+   * pointer event are applied atomically so clamping stays consistent.
+   */
+  fun transformSticker(centroid: Offset, pan: Offset, zoom: Float) {
+    _uiState.update {
+      val placing = it.stickerPlacement as? StickerPlacement.Placing ?: return@update it
+      it.copy(
+        stickerPlacement =
+          placing.copy(
+            transform =
+              StickerGeometry.applyGesture(
+                placing.transform,
+                centroid,
+                pan,
+                zoom,
+                placing.bitmap.width,
+                placing.bitmap.height,
+                placing.contentRect.size,
+              )
+          )
+      )
+    }
+  }
+
+  /**
+   * Commits the sticker being placed, enables the sticker overlay effect, and resumes playback.
+   * The sticker renders once effects are applied.
+   */
+  fun commitStickerPlacement() {
+    val placing = _uiState.value.stickerPlacement as? StickerPlacement.Placing ?: return
+    val placedSticker =
+      PlacedSticker(
+        id = placing.original?.id ?: UUID.randomUUID(),
+        assetName = placing.assetName,
+        bitmap = placing.bitmap,
+        transform = placing.transform,
+        contentRect = placing.contentRect,
+        videoPixelWidth = placing.videoPixelWidth,
+      )
+    _uiState.update {
+      it.copy(
+        placedStickers =
+          ImmutableList.builder<PlacedSticker>().addAll(it.placedStickers).add(placedSticker)
+            .build(),
+        stickerPlacement = StickerPlacement.Inactive,
+        stickerOverlayChecked = true,
+        effectsChanged = true,
+      )
+    }
+    exoPlayer.play()
+  }
+
+  /**
+   * Exits placement mode without committing. When editing an existing sticker, restores it
+   * unchanged.
+   */
+  fun cancelStickerPlacement() {
+    val placing = _uiState.value.stickerPlacement as? StickerPlacement.Placing ?: return
+    _uiState.update {
+      it.copy(
+        placedStickers =
+          placing.original?.let { original ->
+            ImmutableList.builder<PlacedSticker>().addAll(it.placedStickers).add(original).build()
+          } ?: it.placedStickers,
+        stickerPlacement = StickerPlacement.Inactive,
+      )
+    }
+    exoPlayer.play()
+  }
+
+  /**
+   * Removes a committed sticker. The change takes effect the next time effects are applied.
+   *
+   * @param id The [PlacedSticker.id] of the sticker to remove.
+   */
+  fun removePlacedSticker(id: UUID) {
+    _uiState.update {
+      it.copy(
+        placedStickers =
+          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id }),
+        effectsChanged = true,
+      )
+    }
+  }
+
+  /**
    * Builds the video effects list based on the current [EffectUiState] and applies them to the
    * underlying [ExoPlayer].
    */
@@ -282,6 +508,29 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         TextOverlay.createStaticTextOverlay(spannableOverlayText, staticOverlaySettings)
       )
     }
+    // Stickers are added last so they composite on top of the other texture overlays.
+    if (currentState.stickerOverlayChecked) {
+      for (sticker in currentState.placedStickers) {
+        val placement =
+          StickerGeometry.toOverlayPlacement(
+            sticker.transform,
+            sticker.bitmap.width,
+            sticker.bitmap.height,
+            sticker.contentRect.size,
+            sticker.videoPixelWidth,
+          )
+        overlaysBuilder.add(
+          BitmapOverlay.createStaticBitmapOverlay(
+            sticker.bitmap,
+            StaticOverlaySettings.Builder()
+              .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
+              .setScale(placement.scale, placement.scale)
+              .build(),
+          )
+        )
+      }
+    }
+
     val overlays = overlaysBuilder.build()
     if (overlays.isNotEmpty()) {
       listBuilder.add(OverlayEffect(overlays))
