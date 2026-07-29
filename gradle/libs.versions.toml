@@ -69,6 +69,7 @@ kotlinxCoroutinesVersion = "1.9.0"
 ktorVersion = "3.0.3"
 leakCanaryVersion = "2.10"
 lottieVersion = "6.6.0"
+mediapipeTasksVisionVersion = "1.0.0"
 mockitoVersion = "3.12.4"
 okhttpVersion = "4.12.0"
 playServicesCronetVersion = "18.0.1"
@@ -154,6 +155,7 @@ ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.r
 leakcanary-android = { group = "com.squareup.leakcanary", name = "leakcanary-android", version.ref = "leakCanaryVersion" }
 lottie = { group = "com.airbnb.android", name = "lottie", version.ref = "lottieVersion" }
 material = { group = "com.google.android.material", name = "material", version.ref = "androidxMaterialVersion" }
+mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksVisionVersion" }
 mockito-core = { group = "org.mockito", name = "mockito-core", version.ref = "mockitoVersion" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttpVersion" }
 okhttp-urlconnection = { group = "com.squareup.okhttp3", name = "okhttp-urlconnection", version.ref = "okhttpVersion" }

@@ -10,5 +10,16 @@ bakes it into playback as a `BitmapOverlay`.
 See the [demos README](../README.md) for instructions on how to build and run
 this demo.
 
+## Notes
+
+* This demo requires `minSdk` 24 (the rest of the repository builds against
+  23) because of the MediaPipe `tasks-vision` dependency.
+* The MediaPipe interactive segmentation model (`magic_touch.tflite`, ~6 MB)
+  is downloaded automatically on first build by the `downloadSegmenterModel`
+  Gradle task and cached in the build directory. When building offline,
+  download it manually from
+  https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite
+  and place it at `demos/effect/buildout/downloadedAssets/magic_touch.tflite`.
+
 [Effect]: https://github.com/androidx/media/tree/release/libraries/effect
 [ExoPlayer]: https://github.com/androidx/media/tree/release/libraries/exoplayer
