@@ -35,6 +35,15 @@ internal object SegmentationMaskProcessor {
 
     val height: Int
       get() = bottom - top + 1
+
+    /** Returns the smallest box containing both this box and [other]. */
+    fun union(other: Bbox): Bbox =
+      Bbox(
+        minOf(left, other.left),
+        minOf(top, other.top),
+        maxOf(right, other.right),
+        maxOf(bottom, other.bottom),
+      )
   }
 
   /**
