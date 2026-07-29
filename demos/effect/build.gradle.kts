@@ -39,6 +39,14 @@ android {
 
   buildFeatures { compose = true }
 
+  testOptions.unitTests.all { test ->
+    // Forward Robolectric configuration (e.g. -Drobolectric.offline=true and
+    // -Drobolectric.dependency.dir=...) to test workers so tests can run without network access.
+    System.getProperties().stringPropertyNames()
+      .filter { it.startsWith("robolectric.") }
+      .forEach { name -> test.systemProperty(name, System.getProperty(name)) }
+  }
+
   // The MediaPipe segmentation model is downloaded at build time (see downloadSegmenterModel)
   // rather than checked into the repository. Resolved to a plain File because the SourceSet API
   // doesn't accept Provider instances; the task dependency is wired via preBuild below.
@@ -98,4 +106,7 @@ dependencies {
 
   testImplementation(libs.junit)
   testImplementation(libs.truth)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.test.core)
+  testImplementation(libs.kotlinx.coroutines.test)
 }
