@@ -50,4 +50,14 @@
   <string name="color_yellow">Yellow</string>
   <string name="color_cyan">Cyan</string>
   <string name="color_magenta">Magenta</string>
+  <string name="sticker_overlay">Sticker Overlay</string>
+  <string name="sticker_asset">Sticker</string>
+  <string name="place_sticker">Place sticker</string>
+  <string name="placed_stickers">Placed stickers</string>
+  <string name="edit">Edit</string>
+  <string name="delete_sticker">Delete sticker</string>
+  <string name="done">Done</string>
+  <string name="cancel">Cancel</string>
+  <string name="sticker_preview">Sticker preview</string>
+  <string name="sticker_loading_error">Could not load sticker images.</string>
 </resources>
