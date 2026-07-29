@@ -49,4 +49,7 @@ dependencies {
 
   // For detecting and debugging leaks only. LeakCanary is not needed for demo app to work.
   debugImplementation(libs.leakcanary.android)
+
+  testImplementation(libs.junit)
+  testImplementation(libs.truth)
 }
