@@ -17,6 +17,14 @@ package androidx.media3.demo.effect.sticker
 
 import android.graphics.Bitmap
 
+/** Which kind of sticker a gesture produces. */
+internal enum class StickerMode {
+  /** Long-press a paused frame to cut a single image. */
+  STATIC,
+  /** Hold an object while the video plays; frames are recorded until the finger lifts. */
+  ANIMATED,
+}
+
 /** The sticker creation screen's current phase. */
 internal sealed interface CreationPhase {
   /** No video yet; the user needs to pick one. */
@@ -31,12 +39,19 @@ internal sealed interface CreationPhase {
   /** A cutout is ready: [maskPreview] overlays the paused frame, [cutout] is the sticker. */
   data class StaticPreview(val maskPreview: Bitmap, val cutout: Bitmap) : CreationPhase
 
+  /** An animated recording is in progress; [frameCount] frames captured so far. */
+  data class Recording(val frameCount: Int) : CreationPhase
+
+  /** An animated recording is ready to preview and save. */
+  data class AnimatedPreview(val animation: AnimatedSticker) : CreationPhase
+
   /** The sticker is being persisted. */
   data object Saving : CreationPhase
 }
 
 /** UI state for the sticker creation screen. */
 internal data class StickerCreationUiState(
+  val mode: StickerMode = StickerMode.STATIC,
   val phase: CreationPhase = CreationPhase.AwaitingVideo,
   val segmenterReady: Boolean = false,
   val stickerName: String = "",

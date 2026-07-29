@@ -64,6 +64,10 @@
   <string name="sticker_creation_title">Create custom sticker</string>
   <string name="sticker_choose_video">Choose video</string>
   <string name="sticker_hint_long_press">Long-press an object in the video to cut it out</string>
+  <string name="sticker_mode_static">Static</string>
+  <string name="sticker_mode_animated">Animated</string>
+  <string name="sticker_hint_hold_to_record">Hold an object to record it; follow it with your finger and lift to stop</string>
+  <string name="sticker_recording_status">Recording: %1$d frames</string>
   <string name="sticker_mask_preview">Segmentation mask preview</string>
   <string name="sticker_cutout_preview">Sticker cutout preview</string>
   <string name="sticker_name_label">Name</string>
