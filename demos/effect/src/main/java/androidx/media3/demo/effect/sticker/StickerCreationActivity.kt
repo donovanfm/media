@@ -1,0 +1,303 @@
+/*
+ * Copyright 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package androidx.media3.demo.effect.sticker
+
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Bundle
+import android.view.TextureView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.activity.viewModels
+import androidx.annotation.OptIn
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.graphics.createBitmap
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.demo.effect.R
+import androidx.media3.demo.effect.sticker.VideoCoordinateMapper.NormalizedPoint
+import kotlin.math.roundToInt
+
+/**
+ * Full-screen flow for creating a custom sticker from a video.
+ *
+ * The video plays in a plain [TextureView] (so frames can be read back with
+ * [TextureView.getBitmap]) sized to the video's aspect ratio. Long-pressing an object pauses
+ * playback, runs MediaPipe interactive segmentation at the pressed point, and previews the mask;
+ * the cutout can then be named and saved. Launch via [CreateStickerContract]; the caller receives
+ * the saved sticker's id.
+ */
+@OptIn(UnstableApi::class)
+class StickerCreationActivity : ComponentActivity() {
+
+  private val viewModel: StickerCreationViewModel by viewModels()
+
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    if (savedInstanceState == null) {
+      val uriExtra = intent.getStringExtra(CreateStickerContract.EXTRA_MEDIA_URI)
+      viewModel.setMediaUri(uriExtra?.let { Uri.parse(it) })
+    }
+    setContent { StickerCreationScreen(viewModel) }
+  }
+
+  @Composable
+  private fun StickerCreationScreen(viewModel: StickerCreationViewModel) {
+    val uiState by viewModel.uiState.collectAsState()
+    val savedStickerId by viewModel.savedStickerId.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.errorMessage) {
+      uiState.errorMessage?.let { message ->
+        snackbarHostState.showSnackbar(message)
+        viewModel.clearErrorMessage()
+      }
+    }
+
+    LaunchedEffect(savedStickerId) {
+      savedStickerId?.let { id ->
+        setResult(
+          RESULT_OK,
+          Intent().putExtra(CreateStickerContract.EXTRA_STICKER_ID, id),
+        )
+        finish()
+      }
+    }
+
+    Scaffold(
+      modifier = Modifier.fillMaxSize(),
+      snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { paddingValues ->
+      Column(
+        modifier = Modifier.fillMaxWidth().padding(paddingValues),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        Text(
+          text = stringResource(R.string.sticker_creation_title),
+          style = MaterialTheme.typography.titleLarge,
+          modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+        )
+        when (uiState.phase) {
+          CreationPhase.AwaitingVideo -> VideoChooser(viewModel)
+          else -> {
+            VideoSurface(viewModel, uiState)
+            CreationControls(viewModel, uiState)
+          }
+        }
+      }
+    }
+  }
+
+  @Composable
+  private fun VideoChooser(viewModel: StickerCreationViewModel) {
+    val pickVideo =
+      rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
+        if (uri != null) {
+          viewModel.setMediaUri(uri)
+        }
+      }
+    Button(
+      onClick = {
+        pickVideo.launch(PickVisualMediaRequest(PickVisualMedia.VideoOnly))
+      },
+      modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+    ) {
+      Text(text = stringResource(R.string.sticker_choose_video))
+    }
+  }
+
+  @Composable
+  private fun VideoSurface(viewModel: StickerCreationViewModel, uiState: StickerCreationUiState) {
+    Box(
+      modifier =
+        Modifier.fillMaxWidth()
+          .height(dimensionResource(R.dimen.android_view_height))
+          .padding(all = dimensionResource(id = R.dimen.regular_padding))
+          .clip(RoundedCornerShape(12.dp))
+          .background(Color.Black),
+      contentAlignment = Alignment.Center,
+    ) {
+      if (uiState.videoAspectRatio > 0f) {
+        // Sizing the TextureView to the video's aspect ratio keeps the surface undistorted and
+        // free of letterbox bars; taps map to normalized coordinates via the exact-fit path of
+        // VideoCoordinateMapper.
+        Box(modifier = Modifier.aspectRatio(uiState.videoAspectRatio)) {
+          AndroidView(
+            factory = { context -> TextureView(context) },
+            update = { textureView ->
+              viewModel.player.setVideoTextureView(textureView)
+              viewModel.attachFrameSource { reuse ->
+                if (textureView.isAvailable) {
+                  textureView.getBitmap(reuse ?: createCaptureBitmap(uiState.videoAspectRatio))
+                } else {
+                  null
+                }
+              }
+            },
+            onRelease = { textureView ->
+              viewModel.attachFrameSource(null)
+              viewModel.player.clearVideoTextureView(textureView)
+            },
+            modifier =
+              Modifier.fillMaxSize().pointerInput(uiState.videoAspectRatio) {
+                detectTapGestures(
+                  onLongPress = { offset ->
+                    val point =
+                      VideoCoordinateMapper.viewToNormalizedVideo(
+                        viewWidth = size.width.toFloat(),
+                        viewHeight = size.height.toFloat(),
+                        // The surface is already aspect-sized, so its own dimensions act as the
+                        // video dimensions for the exact-fit mapping.
+                        videoWidth = size.width,
+                        videoHeight = size.height,
+                        tapX = offset.x,
+                        tapY = offset.y,
+                      )
+                    if (point != null) {
+                      viewModel.createStaticSticker(point)
+                    }
+                  }
+                )
+              },
+          )
+          MaskOverlay(uiState.phase)
+        }
+      } else {
+        CircularProgressIndicator(color = MaterialTheme.colorScheme.onSurface)
+      }
+    }
+  }
+
+  @Composable
+  private fun MaskOverlay(phase: CreationPhase) {
+    when (phase) {
+      CreationPhase.Segmenting ->
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          CircularProgressIndicator()
+        }
+      is CreationPhase.StaticPreview ->
+        Image(
+          bitmap = phase.maskPreview.asImageBitmap(),
+          contentDescription = stringResource(R.string.sticker_mask_preview),
+          contentScale = ContentScale.FillBounds,
+          modifier = Modifier.fillMaxSize(),
+        )
+      else -> {}
+    }
+  }
+
+  @Composable
+  private fun CreationControls(
+    viewModel: StickerCreationViewModel,
+    uiState: StickerCreationUiState,
+  ) {
+    when (val phase = uiState.phase) {
+      CreationPhase.Playing -> {
+        Text(
+          text = stringResource(R.string.sticker_hint_long_press),
+          style = MaterialTheme.typography.bodyLarge,
+          modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+        )
+        if (!uiState.segmenterReady) {
+          CircularProgressIndicator()
+        }
+      }
+      is CreationPhase.StaticPreview -> {
+        Image(
+          bitmap = phase.cutout.asImageBitmap(),
+          contentDescription = stringResource(R.string.sticker_cutout_preview),
+          modifier =
+            Modifier.size(96.dp).padding(vertical = dimensionResource(R.dimen.small_padding)),
+        )
+        OutlinedTextField(
+          value = uiState.stickerName,
+          onValueChange = { viewModel.setStickerName(it) },
+          label = { Text(stringResource(R.string.sticker_name_label)) },
+          singleLine = true,
+          modifier =
+            Modifier.fillMaxWidth().padding(horizontal = dimensionResource(R.dimen.large_padding)),
+        )
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding)),
+          modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+        ) {
+          Button(onClick = { viewModel.saveSticker() }) {
+            Text(text = stringResource(R.string.sticker_save))
+          }
+          OutlinedButton(onClick = { viewModel.discardPreview() }) {
+            Text(text = stringResource(R.string.sticker_retry))
+          }
+        }
+      }
+      CreationPhase.Saving -> CircularProgressIndicator()
+      else -> {}
+    }
+  }
+
+  /** Allocates a capture bitmap capped at [StickerCreationViewModel.CAPTURE_MAX_DIMENSION]. */
+  private fun createCaptureBitmap(aspectRatio: Float): Bitmap {
+    val maxDimension = StickerCreationViewModel.CAPTURE_MAX_DIMENSION
+    val (width, height) =
+      if (aspectRatio >= 1f) {
+        maxDimension to (maxDimension / aspectRatio).roundToInt().coerceAtLeast(1)
+      } else {
+        (maxDimension * aspectRatio).roundToInt().coerceAtLeast(1) to maxDimension
+      }
+    return createBitmap(width, height)
+  }
+}

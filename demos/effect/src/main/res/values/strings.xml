@@ -60,4 +60,19 @@
   <string name="cancel">Cancel</string>
   <string name="sticker_preview">Sticker preview</string>
   <string name="sticker_loading_error">Could not load sticker images.</string>
+  <string name="create_custom_sticker">Create custom sticker</string>
+  <string name="sticker_creation_title">Create custom sticker</string>
+  <string name="sticker_choose_video">Choose video</string>
+  <string name="sticker_hint_long_press">Long-press an object in the video to cut it out</string>
+  <string name="sticker_mask_preview">Segmentation mask preview</string>
+  <string name="sticker_cutout_preview">Sticker cutout preview</string>
+  <string name="sticker_name_label">Name</string>
+  <string name="sticker_default_name">Custom sticker</string>
+  <string name="sticker_save">Save sticker</string>
+  <string name="sticker_retry">Retry</string>
+  <string name="sticker_error_segmenter_init">Could not initialize the segmenter.</string>
+  <string name="sticker_error_segmentation">Segmentation failed.</string>
+  <string name="sticker_error_frame_capture">Could not capture a video frame.</string>
+  <string name="sticker_error_empty_mask">No object found there. Try another spot.</string>
+  <string name="sticker_error_save">Could not save the sticker.</string>
 </resources>
