@@ -83,4 +83,67 @@ class StickerRepositoryTest {
     assertThat(assets).hasSize(1)
     assertThat(assets[0].name).isEqualTo("Valid")
   }
+
+  private fun testAnimation(): StickerFrameRecorder.ComposedAnimation {
+    val red = IntArray(4) { 0xFFFF0000.toInt() }
+    val blue = IntArray(4) { 0xFF0000FF.toInt() }
+    return StickerFrameRecorder.ComposedAnimation(
+      frames = listOf(red, blue),
+      width = 2,
+      height = 2,
+      timestampsUs = longArrayOf(0, 100_000),
+      durationUs = 200_000,
+    )
+  }
+
+  @Test
+  fun saveAnimated_thenLoadAll_roundTrips() = runTest {
+    val saved = repository.saveAnimated(testAnimation(), "Wave")
+
+    val assets = repository.loadAll()
+
+    assertThat(assets).hasSize(1)
+    val loaded = assets[0] as StickerAsset.Animated
+    assertThat(loaded.id).isEqualTo(saved.id)
+    assertThat(loaded.name).isEqualTo("Wave")
+    assertThat(loaded.frameCount).isEqualTo(2)
+    assertThat(loaded.durationUs).isEqualTo(200_000)
+    assertThat(loaded.firstFrameFile.exists()).isTrue()
+  }
+
+  @Test
+  fun loadAnimated_returnsFramesAndTimeline() = runTest {
+    val saved = repository.saveAnimated(testAnimation(), "Wave")
+
+    val animated = repository.loadAnimated(saved)
+
+    assertThat(animated.frames).hasSize(2)
+    assertThat(animated.frames[0].width).isEqualTo(2)
+    assertThat(animated.frames[0].height).isEqualTo(2)
+    assertThat(animated.timestampsUs).asList().containsExactly(0L, 100_000L).inOrder()
+    assertThat(animated.durationUs).isEqualTo(200_000)
+  }
+
+  @Test
+  fun loadAll_skipsCorruptAnimatedManifest() = runTest {
+    repository.saveAnimated(testAnimation(), "Valid")
+    val brokenDir = File(context.filesDir, "stickers/animated/sticker_broken")
+    brokenDir.mkdirs()
+    File(brokenDir, "manifest.json").writeText("{not json")
+
+    val assets = repository.loadAll()
+
+    assertThat(assets).hasSize(1)
+    assertThat(assets[0].name).isEqualTo("Valid")
+  }
+
+  @Test
+  fun delete_animated_removesDirectory() = runTest {
+    val saved = repository.saveAnimated(testAnimation(), "Doomed")
+
+    repository.delete(saved)
+
+    assertThat(repository.loadAll()).isEmpty()
+    assertThat(saved.directory.exists()).isFalse()
+  }
 }

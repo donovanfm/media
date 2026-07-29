@@ -15,6 +15,7 @@
  */
 package androidx.media3.demo.effect.sticker
 
+import android.graphics.Bitmap
 import java.io.File
 
 /**
@@ -40,4 +41,24 @@ internal sealed interface StickerAsset {
   /** A user-created static sticker: a PNG cutout in app-private storage. */
   data class Static(override val id: String, override val name: String, val imageFile: File) :
     StickerAsset
+
+  /**
+   * A user-created animated sticker: a directory of WebP frames plus a manifest, played as a
+   * looping overlay. [firstFrameFile] backs the picker preview and placement.
+   */
+  data class Animated(
+    override val id: String,
+    override val name: String,
+    val directory: File,
+    val frameCount: Int,
+    val durationUs: Long,
+    val firstFrameFile: File,
+  ) : StickerAsset
 }
+
+/** A fully loaded animated sticker: decoded frames plus their timeline. */
+internal class AnimatedSticker(
+  val frames: List<Bitmap>,
+  val timestampsUs: LongArray,
+  val durationUs: Long,
+)

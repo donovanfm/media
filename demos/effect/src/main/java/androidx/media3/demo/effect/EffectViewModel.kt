@@ -167,6 +167,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
                       BitmapFactory.decodeStream(stream)?.let { put(asset.id, it) }
                     }
                   is StickerAsset.Static -> put(asset.id, stickerRepository.loadBitmap(asset))
+                  is StickerAsset.Animated ->
+                    put(asset.id, stickerRepository.loadFirstFrame(asset))
                 }
               }
             }
