@@ -7,6 +7,12 @@ Among the available effects, the sticker overlay lets you position an image
 over the video by dragging and pinch-zooming it directly on the player, then
 bakes it into playback as a `BitmapOverlay`.
 
+Custom stickers can be created from the loaded video with MediaPipe
+interactive segmentation: long-press an object on a paused frame for a static
+sticker, or switch to animated mode and hold the object while the video plays —
+frames are recorded (follow the object with your finger) until you lift, and
+the result plays back as a looping animated overlay.
+
 See the [demos README](../README.md) for instructions on how to build and run
 this demo.
 

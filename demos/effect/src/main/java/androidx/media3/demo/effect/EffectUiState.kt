@@ -19,6 +19,7 @@ import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.media3.demo.effect.sticker.AnimatedSticker
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.ui.COLORS
 import com.google.common.collect.ImmutableList
@@ -64,6 +65,8 @@ internal data class PlacedSticker(
   val transform: StickerTransform,
   val contentRect: Rect,
   val videoPixelWidth: Int,
+  /** Frames and timeline for animated stickers; null renders [bitmap] statically. */
+  val animated: AnimatedSticker? = null,
 )
 
 /** Whether the user is currently positioning a sticker over the player. */
@@ -81,5 +84,7 @@ internal sealed interface StickerPlacement {
     val transform: StickerTransform,
     val contentRect: Rect,
     val videoPixelWidth: Int,
+    /** Frames and timeline when placing an animated sticker; the preview shows [bitmap]. */
+    val animated: AnimatedSticker? = null,
   ) : StickerPlacement
 }

@@ -36,6 +36,7 @@ import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.sticker.StickerRepository
 import androidx.media3.effect.TextOverlay
@@ -348,7 +349,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
 
   /**
    * Enters placement mode for the currently selected sticker asset: pauses playback and shows a
-   * draggable preview centered over the video.
+   * draggable preview centered over the video. Animated stickers load their frames first (on IO);
+   * the placement preview uses the first frame either way.
    */
   fun startStickerPlacement() {
     val currentState = _uiState.value
@@ -358,28 +360,50 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     val assetId = currentState.selectedStickerAssetId ?: return
     val asset = currentState.stickerAssets.find { it.id == assetId } ?: return
     val bitmap = stickerBitmaps[assetId] ?: return
-    exoPlayer.pause()
-    val videoSize = exoPlayer.videoSize
-    val contentRect =
-      StickerGeometry.videoContentRect(
-        currentState.playerBoxSize,
-        videoSize.width,
-        videoSize.height,
-        videoSize.pixelWidthHeightRatio,
-      )
-    _uiState.update {
-      it.copy(
-        stickerPlacement =
-          StickerPlacement.Placing(
-            original = null,
-            assetName = asset.name,
-            bitmap = bitmap,
-            transform =
-              StickerGeometry.centeredTransform(bitmap.width, bitmap.height, contentRect.size),
-            contentRect = contentRect,
-            videoPixelWidth = videoSize.width,
-          )
-      )
+    viewModelScope.launch {
+      val animated =
+        if (asset is StickerAsset.Animated) {
+          try {
+            stickerRepository.loadAnimated(asset)
+          } catch (e: IOException) {
+            _uiState.update {
+              it.copy(
+                errorMessage =
+                  getApplication<Application>().getString(R.string.sticker_loading_error)
+              )
+            }
+            return@launch
+          }
+        } else {
+          null
+        }
+      if (_uiState.value.stickerPlacement is StickerPlacement.Placing) {
+        return@launch
+      }
+      exoPlayer.pause()
+      val videoSize = exoPlayer.videoSize
+      val contentRect =
+        StickerGeometry.videoContentRect(
+          _uiState.value.playerBoxSize,
+          videoSize.width,
+          videoSize.height,
+          videoSize.pixelWidthHeightRatio,
+        )
+      _uiState.update {
+        it.copy(
+          stickerPlacement =
+            StickerPlacement.Placing(
+              original = null,
+              assetName = asset.name,
+              bitmap = bitmap,
+              transform =
+                StickerGeometry.centeredTransform(bitmap.width, bitmap.height, contentRect.size),
+              contentRect = contentRect,
+              videoPixelWidth = videoSize.width,
+              animated = animated,
+            )
+        )
+      }
     }
   }
 
@@ -408,6 +432,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             transform = sticker.transform,
             contentRect = sticker.contentRect,
             videoPixelWidth = sticker.videoPixelWidth,
+            animated = sticker.animated,
           ),
       )
     }
@@ -452,6 +477,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         transform = placing.transform,
         contentRect = placing.contentRect,
         videoPixelWidth = placing.videoPixelWidth,
+        animated = placing.animated,
       )
     _uiState.update {
       it.copy(
@@ -551,14 +577,20 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             sticker.contentRect.size,
             sticker.videoPixelWidth,
           )
+        val overlaySettings =
+          StaticOverlaySettings.Builder()
+            .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
+            .setScale(placement.scale, placement.scale)
+            .build()
         overlaysBuilder.add(
-          BitmapOverlay.createStaticBitmapOverlay(
-            sticker.bitmap,
-            StaticOverlaySettings.Builder()
-              .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
-              .setScale(placement.scale, placement.scale)
-              .build(),
-          )
+          sticker.animated?.let { animated ->
+            AnimatedStickerOverlay(
+              animated.frames,
+              animated.timestampsUs,
+              animated.durationUs,
+              overlaySettings,
+            )
+          } ?: BitmapOverlay.createStaticBitmapOverlay(sticker.bitmap, overlaySettings)
         )
       }
     }
