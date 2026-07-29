@@ -19,6 +19,7 @@ import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.ui.COLORS
 import com.google.common.collect.ImmutableList
 import java.util.UUID
@@ -41,8 +42,8 @@ internal data class EffectUiState(
   val lottieOverlayOptions: ImmutableList<String> = ImmutableList.of(),
   val stickerOverlayChecked: Boolean = false,
   val stickerAssetsLoaded: Boolean = false,
-  val stickerAssetNames: ImmutableList<String> = ImmutableList.of(),
-  val selectedStickerAssetName: String? = null,
+  val stickerAssets: ImmutableList<StickerAsset> = ImmutableList.of(),
+  val selectedStickerAssetId: String? = null,
   val placedStickers: ImmutableList<PlacedSticker> = ImmutableList.of(),
   val stickerPlacement: StickerPlacement = StickerPlacement.Inactive,
   val playerBoxSize: Size = Size.Zero,

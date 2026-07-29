@@ -18,6 +18,7 @@ package androidx.media3.demo.effect
 import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.annotation.OptIn
@@ -86,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
+import androidx.media3.demo.effect.sticker.CreateStickerContract
 import androidx.media3.demo.effect.ui.ColorsDropDownMenu
 import androidx.media3.demo.effect.ui.GenericExposedDropdownMenu
 import androidx.media3.demo.effect.ui.InputSelector
@@ -350,21 +352,40 @@ class EffectActivity : ComponentActivity() {
           checked = uiState.stickerOverlayChecked,
           onCheckedChange = { checked -> viewModel.updateStickerChecked(checked) },
         ) {
+          val createSticker =
+            rememberLauncherForActivityResult(CreateStickerContract()) { stickerId ->
+              if (stickerId != null) {
+                viewModel.refreshStickers(stickerId)
+              }
+            }
           Column {
-            GenericExposedDropdownMenu(
-              label = stringResource(R.string.sticker_asset),
-              selectedValue =
-                uiState.selectedStickerAssetName ?: uiState.stickerAssetNames.firstOrNull() ?: "",
-              options = uiState.stickerAssetNames,
-              onOptionSelected = { viewModel.updateStickerAssetName(it) },
-              modifier =
-                Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
-            )
-            Button(
-              enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
-              onClick = { viewModel.startStickerPlacement() },
+            val selectedAsset =
+              uiState.stickerAssets.find { it.id == uiState.selectedStickerAssetId }
+                ?: uiState.stickerAssets.firstOrNull()
+            if (selectedAsset != null) {
+              GenericExposedDropdownMenu(
+                label = stringResource(R.string.sticker_asset),
+                selectedValue = selectedAsset,
+                options = uiState.stickerAssets,
+                onOptionSelected = { viewModel.updateSelectedStickerAsset(it.id) },
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .padding(bottom = dimensionResource(R.dimen.large_padding)),
+                itemLabelProvider = { it.name },
+              )
+            }
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))
             ) {
-              Text(text = stringResource(R.string.place_sticker))
+              Button(
+                enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+                onClick = { viewModel.startStickerPlacement() },
+              ) {
+                Text(text = stringResource(R.string.place_sticker))
+              }
+              OutlinedButton(onClick = { createSticker.launch(viewModel.currentMediaUri()) }) {
+                Text(text = stringResource(R.string.create_custom_sticker))
+              }
             }
             if (uiState.placedStickers.isNotEmpty()) {
               Text(

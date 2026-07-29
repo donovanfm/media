@@ -18,6 +18,7 @@ package androidx.media3.demo.effect
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
@@ -35,6 +36,8 @@ import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.demo.effect.sticker.StickerAsset
+import androidx.media3.demo.effect.sticker.StickerRepository
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
@@ -76,8 +79,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
 
   private var lottieOverlayOptions: Map<String, Effect> = emptyMap()
 
-  // Decoded sticker bitmaps keyed by display name; names are published via EffectUiState while
-  // the heavyweight bitmaps stay here (same idiom as lottieOverlayOptions).
+  private val stickerRepository = StickerRepository(application)
+
+  // Decoded sticker bitmaps keyed by StickerAsset.id; the asset list is published via
+  // EffectUiState while the heavyweight bitmaps stay here (same idiom as lottieOverlayOptions).
   private var stickerBitmaps: Map<String, Bitmap> = emptyMap()
 
   init {
@@ -138,28 +143,44 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     }
   }
 
-  private fun loadStickerAssets() {
+  /**
+   * Loads the sticker picker contents — bundled assets plus user-created stickers — and decodes
+   * their bitmaps off the main thread. When [selectId] is given (a freshly created sticker), it
+   * becomes the selected entry.
+   */
+  private fun loadStickerAssets(selectId: String? = null) {
     viewModelScope.launch {
       try {
-        val bitmaps =
+        val (assets, bitmaps) =
           withContext(Dispatchers.IO) {
             val resources = getApplication<Application>().resources
             val names = resources.getStringArray(R.array.sticker_asset_names)
             val paths = resources.getStringArray(R.array.sticker_asset_paths)
-            buildMap {
-              for (i in names.indices) {
-                getApplication<Application>().assets.open(paths[i]).use { stream ->
-                  BitmapFactory.decodeStream(stream)?.let { put(names[i], it) }
+            val bundled = names.indices.map { StickerAsset.Bundled(names[it], paths[it]) }
+            val custom = stickerRepository.loadAll()
+            val allAssets = bundled + custom
+            val bitmaps = buildMap {
+              for (asset in allAssets) {
+                when (asset) {
+                  is StickerAsset.Bundled ->
+                    getApplication<Application>().assets.open(asset.assetPath).use { stream ->
+                      BitmapFactory.decodeStream(stream)?.let { put(asset.id, it) }
+                    }
+                  is StickerAsset.Static -> put(asset.id, stickerRepository.loadBitmap(asset))
                 }
               }
             }
+            allAssets.filter { bitmaps.containsKey(it.id) } to bitmaps
           }
         stickerBitmaps = bitmaps
         _uiState.update {
           it.copy(
-            stickerAssetNames = ImmutableList.copyOf(bitmaps.keys),
-            selectedStickerAssetName = bitmaps.keys.firstOrNull(),
-            stickerAssetsLoaded = bitmaps.isNotEmpty(),
+            stickerAssets = ImmutableList.copyOf(assets),
+            selectedStickerAssetId =
+              selectId?.takeIf { id -> bitmaps.containsKey(id) }
+                ?: it.selectedStickerAssetId?.takeIf { id -> bitmaps.containsKey(id) }
+                ?: assets.firstOrNull()?.id,
+            stickerAssetsLoaded = assets.isNotEmpty(),
           )
         }
       } catch (e: IOException) {
@@ -171,6 +192,14 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
       }
     }
   }
+
+  /** Reloads the sticker list after a sticker was created, selecting the new one. */
+  fun refreshStickers(selectId: String?) {
+    loadStickerAssets(selectId)
+  }
+
+  /** The URI of the currently playing media item, used as the sticker creation source video. */
+  fun currentMediaUri(): Uri? = exoPlayer.currentMediaItem?.localConfiguration?.uri
 
   /**
    * Updates the player with a new list of [MediaItem]s to play, clearing any active video effects
@@ -300,10 +329,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * Updates the selected sticker asset in the UI controls. Selection alone doesn't change the
    * applied effects; it only chooses what the next placement uses.
    *
-   * @param name The display name of the sticker asset.
+   * @param id The [StickerAsset.id] of the sticker asset.
    */
-  fun updateStickerAssetName(name: String) {
-    _uiState.update { it.copy(selectedStickerAssetName = name) }
+  fun updateSelectedStickerAsset(id: String) {
+    _uiState.update { it.copy(selectedStickerAssetId = id) }
   }
 
   /**
@@ -324,8 +353,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     if (currentState.stickerPlacement is StickerPlacement.Placing) {
       return
     }
-    val assetName = currentState.selectedStickerAssetName ?: return
-    val bitmap = stickerBitmaps[assetName] ?: return
+    val assetId = currentState.selectedStickerAssetId ?: return
+    val asset = currentState.stickerAssets.find { it.id == assetId } ?: return
+    val bitmap = stickerBitmaps[assetId] ?: return
     exoPlayer.pause()
     val videoSize = exoPlayer.videoSize
     val contentRect =
@@ -340,7 +370,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         stickerPlacement =
           StickerPlacement.Placing(
             original = null,
-            assetName = assetName,
+            assetName = asset.name,
             bitmap = bitmap,
             transform =
               StickerGeometry.centeredTransform(bitmap.width, bitmap.height, contentRect.size),
