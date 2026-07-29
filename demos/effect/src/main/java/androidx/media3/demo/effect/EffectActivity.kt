@@ -15,6 +15,7 @@
  */
 package androidx.media3.demo.effect
 
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,8 +24,10 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,14 +35,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -57,12 +68,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.demo.effect.ui.ColorsDropDownMenu
@@ -70,6 +91,7 @@ import androidx.media3.demo.effect.ui.GenericExposedDropdownMenu
 import androidx.media3.demo.effect.ui.InputSelector
 import androidx.media3.ui.compose.material3.Player
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -114,7 +136,14 @@ class EffectActivity : ComponentActivity() {
         ) { mediaItems ->
           viewModel.selectMediaItems(mediaItems)
         }
-        PlayerScreen(viewModel.exoPlayer)
+        PlayerScreen(
+          player = viewModel.exoPlayer,
+          stickerPlacement = uiState.stickerPlacement,
+          onPlayerBoxSized = { size -> viewModel.updatePlayerBoxSize(size) },
+          onStickerTransform = { centroid, pan, zoom ->
+            viewModel.transformSticker(centroid, pan, zoom)
+          },
+        )
         EffectControls(viewModel, uiState)
       }
     }
@@ -122,7 +151,12 @@ class EffectActivity : ComponentActivity() {
 
   @OptIn(ExperimentalApi::class)
   @Composable
-  private fun PlayerScreen(player: Player?) {
+  private fun PlayerScreen(
+    player: Player?,
+    stickerPlacement: StickerPlacement,
+    onPlayerBoxSized: (Size) -> Unit,
+    onStickerTransform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+  ) {
     var showControls by remember { mutableStateOf(true) }
     var interactionCount by remember { mutableStateOf(0) }
 
@@ -144,13 +178,16 @@ class EffectActivity : ComponentActivity() {
           .height(dimensionResource(id = R.dimen.android_view_height))
           .padding(all = dimensionResource(id = R.dimen.regular_padding))
           .clip(RoundedCornerShape(12.dp))
-          .background(Color.Black),
+          .background(Color.Black)
+          .onSizeChanged { size -> onPlayerBoxSized(size.toSize()) },
       contentAlignment = Alignment.Center,
     ) {
       if (player != null) {
         Player(
           player = player,
-          showControls = showControls,
+          // Hide the controls during sticker placement so they don't compete with the gesture
+          // layer drawn on top.
+          showControls = showControls && stickerPlacement is StickerPlacement.Inactive,
           modifier =
             Modifier.pointerInput(Unit) {
               awaitPointerEventScope {
@@ -166,19 +203,78 @@ class EffectActivity : ComponentActivity() {
           // Ensure that the internal Player composable doesn't have any gestures that might
           // conflict with this early interception.
         )
+        if (stickerPlacement is StickerPlacement.Placing) {
+          DraggableSticker(
+            bitmap = stickerPlacement.bitmap,
+            transform = stickerPlacement.transform,
+            contentRect = stickerPlacement.contentRect,
+            onTransform = onStickerTransform,
+            modifier = Modifier.align(Alignment.TopStart),
+          )
+        }
       } else {
         CircularProgressIndicator(color = MaterialTheme.colorScheme.onSurface)
       }
     }
   }
 
+  /**
+   * The draggable, pinch-scalable sticker preview drawn over the video during placement. The
+   * gesture area is sized and positioned to [contentRect] (the letterboxed video area) so the
+   * sticker can't be placed on the black bars.
+   */
+  @Composable
+  private fun DraggableSticker(
+    bitmap: Bitmap,
+    transform: StickerTransform,
+    contentRect: Rect,
+    onTransform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+    modifier: Modifier = Modifier,
+  ) {
+    val density = LocalDensity.current
+    Box(
+      modifier
+        .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
+        .size(
+          with(density) { contentRect.width.toDp() },
+          with(density) { contentRect.height.toDp() },
+        )
+        .clipToBounds()
+        .pointerInput(Unit) {
+          detectTransformGestures { centroid, pan, zoom, _ -> onTransform(centroid, pan, zoom) }
+        }
+    ) {
+      Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = stringResource(R.string.sticker_preview),
+        modifier =
+          Modifier.offset {
+              IntOffset(transform.offset.x.roundToInt(), transform.offset.y.roundToInt())
+            }
+            .graphicsLayer(scaleX = transform.scale, scaleY = transform.scale)
+            .wrapContentSize(align = Alignment.TopStart, unbounded = true),
+      )
+    }
+  }
+
   @Composable
   private fun EffectControls(viewModel: EffectViewModel, uiState: EffectUiState) {
-    Button(
-      enabled = uiState.effectsEnabled && uiState.effectsChanged,
-      onClick = { viewModel.applyEffects() },
-    ) {
-      Text(text = stringResource(id = R.string.apply_effects))
+    if (uiState.stickerPlacement is StickerPlacement.Placing) {
+      Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))) {
+        Button(onClick = { viewModel.commitStickerPlacement() }) {
+          Text(text = stringResource(id = R.string.done))
+        }
+        OutlinedButton(onClick = { viewModel.cancelStickerPlacement() }) {
+          Text(text = stringResource(id = R.string.cancel))
+        }
+      }
+    } else {
+      Button(
+        enabled = uiState.effectsEnabled && uiState.effectsChanged,
+        onClick = { viewModel.applyEffects() },
+      ) {
+        Text(text = stringResource(id = R.string.apply_effects))
+      }
     }
 
     EffectControlsList(viewModel, uiState)
@@ -243,6 +339,60 @@ class EffectActivity : ComponentActivity() {
                 modifier =
                   Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
               )
+            }
+          }
+        }
+      }
+      item {
+        EffectItem(
+          name = stringResource(R.string.sticker_overlay),
+          enabled = uiState.effectsEnabled && uiState.stickerAssetsLoaded,
+          checked = uiState.stickerOverlayChecked,
+          onCheckedChange = { checked -> viewModel.updateStickerChecked(checked) },
+        ) {
+          Column {
+            GenericExposedDropdownMenu(
+              label = stringResource(R.string.sticker_asset),
+              selectedValue =
+                uiState.selectedStickerAssetName ?: uiState.stickerAssetNames.firstOrNull() ?: "",
+              options = uiState.stickerAssetNames,
+              onOptionSelected = { viewModel.updateStickerAssetName(it) },
+              modifier =
+                Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
+            )
+            Button(
+              enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+              onClick = { viewModel.startStickerPlacement() },
+            ) {
+              Text(text = stringResource(R.string.place_sticker))
+            }
+            if (uiState.placedStickers.isNotEmpty()) {
+              Text(
+                text = stringResource(R.string.placed_stickers),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = dimensionResource(R.dimen.large_padding)),
+              )
+              uiState.placedStickers.forEach { sticker ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                    text = sticker.assetName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                  )
+                  OutlinedButton(
+                    enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+                    onClick = { viewModel.editPlacedSticker(sticker.id) },
+                  ) {
+                    Text(text = stringResource(R.string.edit))
+                  }
+                  IconButton(onClick = { viewModel.removePlacedSticker(sticker.id) }) {
+                    Icon(
+                      imageVector = Icons.TwoTone.Delete,
+                      contentDescription = stringResource(R.string.delete_sticker),
+                    )
+                  }
+                }
+              }
             }
           }
         }
