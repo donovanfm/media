@@ -17,7 +17,10 @@ package androidx.media3.demo.effect.sticker
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
@@ -33,6 +36,8 @@ import androidx.media3.demo.effect.R
 import androidx.media3.demo.effect.sticker.VideoCoordinateMapper.NormalizedPoint
 import androidx.media3.exoplayer.ExoPlayer
 import java.io.IOException
+import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,7 +91,10 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
               } else {
                 0f
               }
-            _uiState.update { it.copy(videoAspectRatio = aspectRatio) }
+            _uiState.update {
+              // A stale player event must not clobber a photo source's aspect ratio.
+              if (it.sourceImage != null) it else it.copy(sourceAspectRatio = aspectRatio)
+            }
           }
 
           override fun onPlayerError(error: PlaybackException) {
@@ -125,24 +133,62 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     }
   }
 
-  /** Sets the video to cut stickers from, or moves to [CreationPhase.AwaitingVideo] when null. */
-  fun setMediaUri(uri: Uri?) {
+  /**
+   * Sets the photo or video to cut stickers from, or moves to [CreationPhase.AwaitingSource] when
+   * null. Images and videos are told apart by their content type; anything that isn't an image
+   * (including http(s) URIs, whose type is unknown) is treated as video.
+   */
+  fun setSource(uri: Uri?) {
     if (uri == null) {
-      _uiState.update { it.copy(phase = CreationPhase.AwaitingVideo) }
+      _uiState.update { it.copy(phase = CreationPhase.AwaitingSource) }
       return
     }
-    player.setMediaItem(MediaItem.fromUri(uri))
-    player.prepare()
-    player.play()
+    stopRecording()
     pendingCutout = null
     pendingAnimated = null
-    _uiState.update { it.copy(phase = CreationPhase.Playing) }
+    viewModelScope.launch {
+      val isImage =
+        withContext(Dispatchers.IO) {
+          getApplication<Application>().contentResolver.getType(uri)?.startsWith("image/") == true
+        }
+      if (isImage) {
+        val image = withContext(Dispatchers.IO) { decodeScaledImage(uri) }
+        if (image == null) {
+          _uiState.update {
+            it.copy(errorMessage = getString(R.string.sticker_error_source_load))
+          }
+          return@launch
+        }
+        player.stop()
+        player.clearMediaItems()
+        _uiState.update {
+          it.copy(
+            phase = CreationPhase.Playing,
+            sourceImage = image,
+            sourceAspectRatio = image.width.toFloat() / image.height,
+            // Recording a still image would just repeat one frame.
+            mode = StickerMode.STATIC,
+          )
+        }
+      } else {
+        player.setMediaItem(MediaItem.fromUri(uri))
+        player.prepare()
+        player.play()
+        _uiState.update {
+          it.copy(phase = CreationPhase.Playing, sourceImage = null, sourceAspectRatio = 0f)
+        }
+      }
+    }
   }
 
   /** Switches between static and animated capture. Ignored while a recording is in progress. */
   fun setMode(mode: StickerMode) {
-    val phase = _uiState.value.phase
+    val currentState = _uiState.value
+    val phase = currentState.phase
     if (phase is CreationPhase.Recording || phase == CreationPhase.Saving) {
+      return
+    }
+    if (mode == StickerMode.ANIMATED && currentState.sourceImage != null) {
       return
     }
     pendingCutout = null
@@ -150,11 +196,11 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     _uiState.update {
       it.copy(
         mode = mode,
-        phase = if (it.phase == CreationPhase.AwaitingVideo) it.phase else CreationPhase.Playing,
+        phase = if (it.phase == CreationPhase.AwaitingSource) it.phase else CreationPhase.Playing,
       )
     }
-    if (phase != CreationPhase.AwaitingVideo) {
-      player.play()
+    if (phase != CreationPhase.AwaitingSource) {
+      resumeSource()
     }
   }
 
@@ -164,17 +210,21 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   }
 
   /**
-   * Cuts a static sticker: pauses playback, captures the current frame, segments the object at
-   * [point], and shows the mask preview.
+   * Cuts a static sticker: segments the object at [point] in the current source — a photo, or
+   * the current video frame (pausing playback) — and shows the mask preview.
    */
   fun createStaticSticker(point: NormalizedPoint) {
-    val currentPhase = _uiState.value.phase
-    if (currentPhase != CreationPhase.Playing || !_uiState.value.segmenterReady) {
+    val currentState = _uiState.value
+    if (currentState.phase != CreationPhase.Playing || !currentState.segmenterReady) {
       return
     }
     viewModelScope.launch {
-      player.pause()
-      val frame = frameSource?.captureFrame(null)
+      val frame =
+        currentState.sourceImage
+          ?: run {
+            player.pause()
+            frameSource?.captureFrame(null)
+          }
       if (frame == null) {
         _uiState.update {
           it.copy(
@@ -182,7 +232,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
             errorMessage = getString(R.string.sticker_error_frame_capture),
           )
         }
-        player.play()
+        resumeSource()
         return@launch
       }
       _uiState.update { it.copy(phase = CreationPhase.Segmenting) }
@@ -196,7 +246,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
               errorMessage = getString(R.string.sticker_error_empty_mask),
             )
           }
-          player.play()
+          resumeSource()
         } else {
           pendingCutout = preview.second
           _uiState.update {
@@ -210,7 +260,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
             errorMessage = getString(R.string.sticker_error_segmentation),
           )
         }
-        player.play()
+        resumeSource()
       }
     }
   }
@@ -223,7 +273,12 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
    * when the finger lifts ([stopRecording]), a capacity cap is hit, or an error occurs.
    */
   fun startRecording(point: NormalizedPoint) {
-    if (_uiState.value.phase != CreationPhase.Playing || !_uiState.value.segmenterReady) {
+    val currentState = _uiState.value
+    if (
+      currentState.phase != CreationPhase.Playing ||
+        !currentState.segmenterReady ||
+        currentState.sourceImage != null
+    ) {
       return
     }
     latestPoint = point
@@ -333,7 +388,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
               errorMessage = getString(R.string.sticker_error_save),
             )
           }
-          player.play()
+          resumeSource()
         } else {
           throw e
         }
@@ -341,17 +396,64 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     }
   }
 
-  /** Discards the current preview and resumes playback. */
+  /** Discards the current preview and resumes the source. */
   fun discardPreview() {
     pendingCutout = null
     pendingAnimated = null
     _uiState.update { it.copy(phase = CreationPhase.Playing) }
-    player.play()
+    resumeSource()
   }
 
   /** Clears any active error message. */
   fun clearErrorMessage() {
     _uiState.update { it.copy(errorMessage = null) }
+  }
+
+  /** Resumes playback when the source is a video; photos have nothing to resume. */
+  private fun resumeSource() {
+    if (_uiState.value.sourceImage == null) {
+      player.play()
+    }
+  }
+
+  /**
+   * Decodes a photo capped at [CAPTURE_MAX_DIMENSION] on the long edge, or null on failure. Uses
+   * ImageDecoder on API 28+ (which applies EXIF rotation and exact target sizing); the
+   * BitmapFactory fallback on older API levels ignores EXIF orientation — acceptable for a demo.
+   * The result must be a software bitmap so its pixels can be read for segmentation and cutouts.
+   */
+  private fun decodeScaledImage(uri: Uri): Bitmap? {
+    val resolver = getApplication<Application>().contentResolver
+    return try {
+      if (Build.VERSION.SDK_INT >= 28) {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
+          decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+          val longEdge = max(info.size.width, info.size.height)
+          if (longEdge > CAPTURE_MAX_DIMENSION) {
+            val scale = CAPTURE_MAX_DIMENSION.toFloat() / longEdge
+            decoder.setTargetSize(
+              (info.size.width * scale).roundToInt().coerceAtLeast(1),
+              (info.size.height * scale).roundToInt().coerceAtLeast(1),
+            )
+          }
+        }
+      } else {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+          return null
+        }
+        var sampleSize = 1
+        while (max(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= CAPTURE_MAX_DIMENSION) {
+          sampleSize *= 2
+        }
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+      }
+    } catch (e: IOException) {
+      Log.w(TAG, "Could not decode image source", e)
+      null
+    }
   }
 
   override fun onCleared() {

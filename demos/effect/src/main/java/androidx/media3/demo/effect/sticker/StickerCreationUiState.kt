@@ -27,10 +27,10 @@ internal enum class StickerMode {
 
 /** The sticker creation screen's current phase. */
 internal sealed interface CreationPhase {
-  /** No video yet; the user needs to pick one. */
-  data object AwaitingVideo : CreationPhase
+  /** No source media yet; the user needs to pick a photo or video. */
+  data object AwaitingSource : CreationPhase
 
-  /** Video is playing; waiting for the user to long-press an object. */
+  /** The source is showing; waiting for the user to long-press an object. */
   data object Playing : CreationPhase
 
   /** A segmentation is running on the paused frame. */
@@ -52,9 +52,11 @@ internal sealed interface CreationPhase {
 /** UI state for the sticker creation screen. */
 internal data class StickerCreationUiState(
   val mode: StickerMode = StickerMode.STATIC,
-  val phase: CreationPhase = CreationPhase.AwaitingVideo,
+  val phase: CreationPhase = CreationPhase.AwaitingSource,
   val segmenterReady: Boolean = false,
   val stickerName: String = "",
-  val videoAspectRatio: Float = 0f, // width/height including pixel aspect; 0 when unknown
+  /** Decoded photo when the source is an image; null when the source is a video. */
+  val sourceImage: Bitmap? = null,
+  val sourceAspectRatio: Float = 0f, // width/height including pixel aspect; 0 when unknown
   val errorMessage: String? = null,
 )

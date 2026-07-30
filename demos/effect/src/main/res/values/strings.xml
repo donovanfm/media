@@ -61,8 +61,9 @@
   <string name="sticker_loading_error">Could not load sticker images.</string>
   <string name="create_custom_sticker">Create custom sticker</string>
   <string name="sticker_creation_title">Create custom sticker</string>
-  <string name="sticker_choose_video">Choose video</string>
-  <string name="sticker_hint_long_press">Long-press an object in the video to cut it out</string>
+  <string name="sticker_choose_media">Choose photo or video</string>
+  <string name="sticker_source_photo">Source photo</string>
+  <string name="sticker_hint_long_press">Long-press an object to cut it out</string>
   <string name="sticker_mode_static">Static</string>
   <string name="sticker_mode_animated">Animated</string>
   <string name="sticker_hint_hold_to_record">Hold an object to record it; follow it with your finger and lift to stop</string>
@@ -79,4 +80,5 @@
   <string name="sticker_error_empty_mask">No object found there. Try another spot.</string>
   <string name="sticker_error_save">Could not save the sticker.</string>
   <string name="sticker_error_playback">Video playback failed.</string>
+  <string name="sticker_error_source_load">Could not load the selected media.</string>
 </resources>

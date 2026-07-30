@@ -104,7 +104,7 @@ class StickerCreationActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     if (savedInstanceState == null) {
       val uriExtra = intent.getStringExtra(CreateStickerContract.EXTRA_MEDIA_URI)
-      viewModel.setMediaUri(uriExtra?.let { Uri.parse(it) })
+      viewModel.setSource(uriExtra?.let { Uri.parse(it) })
     }
     setContent { StickerCreationScreen(viewModel) }
   }
@@ -145,11 +145,17 @@ class StickerCreationActivity : ComponentActivity() {
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
         )
-        ModeSelector(viewModel, uiState)
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding)),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          ModeSelector(viewModel, uiState)
+          SourceChooser(viewModel, uiState)
+        }
         when (uiState.phase) {
-          CreationPhase.AwaitingVideo -> VideoChooser(viewModel)
+          CreationPhase.AwaitingSource -> {}
           else -> {
-            VideoSurface(viewModel, uiState)
+            SourceSurface(viewModel, uiState)
             CreationControls(viewModel, uiState)
           }
         }
@@ -166,7 +172,10 @@ class StickerCreationActivity : ComponentActivity() {
         SegmentedButton(
           selected = uiState.mode == mode,
           onClick = { viewModel.setMode(mode) },
-          enabled = !recordingOrSaving,
+          enabled =
+            !recordingOrSaving &&
+              // Recording a still image would just repeat one frame.
+              !(mode == StickerMode.ANIMATED && uiState.sourceImage != null),
           shape =
             SegmentedButtonDefaults.itemShape(index = index, count = StickerMode.entries.size),
         ) {
@@ -184,26 +193,26 @@ class StickerCreationActivity : ComponentActivity() {
     }
   }
 
+  /** Picks a photo or video from the device as the sticker source; available at any time. */
   @Composable
-  private fun VideoChooser(viewModel: StickerCreationViewModel) {
-    val pickVideo =
+  private fun SourceChooser(viewModel: StickerCreationViewModel, uiState: StickerCreationUiState) {
+    val pickMedia =
       rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
         if (uri != null) {
-          viewModel.setMediaUri(uri)
+          viewModel.setSource(uri)
         }
       }
-    Button(
-      onClick = {
-        pickVideo.launch(PickVisualMediaRequest(PickVisualMedia.VideoOnly))
-      },
-      modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+    OutlinedButton(
+      enabled =
+        uiState.phase !is CreationPhase.Recording && uiState.phase != CreationPhase.Saving,
+      onClick = { pickMedia.launch(PickVisualMediaRequest(PickVisualMedia.ImageAndVideo)) },
     ) {
-      Text(text = stringResource(R.string.sticker_choose_video))
+      Text(text = stringResource(R.string.sticker_choose_media))
     }
   }
 
   @Composable
-  private fun VideoSurface(viewModel: StickerCreationViewModel, uiState: StickerCreationUiState) {
+  private fun SourceSurface(viewModel: StickerCreationViewModel, uiState: StickerCreationUiState) {
     Box(
       modifier =
         Modifier.fillMaxWidth()
@@ -213,14 +222,27 @@ class StickerCreationActivity : ComponentActivity() {
           .background(Color.Black),
       contentAlignment = Alignment.Center,
     ) {
-      run {
+      val sourceImage = uiState.sourceImage
+      if (sourceImage != null) {
+        // Photo source: shown at its own aspect ratio, so taps map through the same exact-fit
+        // coordinate path as the video surface.
+        Box(modifier = Modifier.aspectRatio(uiState.sourceAspectRatio)) {
+          Image(
+            bitmap = sourceImage.asImageBitmap(),
+            contentDescription = stringResource(R.string.sticker_source_photo),
+            contentScale = ContentScale.FillBounds,
+            modifier = Modifier.fillMaxSize().segmentGestures(uiState.mode, viewModel),
+          )
+          MaskOverlay(uiState.phase)
+        }
+      } else {
         // Sizing the TextureView to the video's aspect ratio keeps the surface undistorted and
         // free of letterbox bars; taps map to normalized coordinates via the exact-fit path of
         // VideoCoordinateMapper. The surface must exist BEFORE the aspect ratio is known: the
         // player only decodes video (and thus reports its size) once it has an output surface,
         // so an unknown ratio renders at a 16:9 placeholder until onVideoSizeChanged corrects it.
         val aspectRatio =
-          if (uiState.videoAspectRatio > 0f) uiState.videoAspectRatio else DEFAULT_ASPECT_RATIO
+          if (uiState.sourceAspectRatio > 0f) uiState.sourceAspectRatio else DEFAULT_ASPECT_RATIO
         Box(modifier = Modifier.aspectRatio(aspectRatio)) {
           AndroidView(
             factory = { context -> TextureView(context) },
@@ -238,39 +260,10 @@ class StickerCreationActivity : ComponentActivity() {
               viewModel.attachFrameSource(null)
               viewModel.player.clearVideoTextureView(textureView)
             },
-            modifier =
-              Modifier.fillMaxSize().pointerInput(uiState.mode, uiState.videoAspectRatio) {
-                when (uiState.mode) {
-                  StickerMode.STATIC ->
-                    detectTapGestures(
-                      onLongPress = { offset ->
-                        mapToVideoPoint(offset)?.let { viewModel.createStaticSticker(it) }
-                      }
-                    )
-                  StickerMode.ANIMATED ->
-                    awaitEachGesture {
-                      val down = awaitFirstDown()
-                      val longPress = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
-                      val startPoint =
-                        mapToVideoPoint(longPress.position) ?: return@awaitEachGesture
-                      viewModel.startRecording(startPoint)
-                      try {
-                        drag(longPress.id) { change ->
-                          mapToVideoPoint(change.position)?.let {
-                            viewModel.updateFingerPosition(it)
-                          }
-                          change.consume()
-                        }
-                      } finally {
-                        // Finger lifted or the gesture was cancelled; drain the capture loop.
-                        viewModel.stopRecording()
-                      }
-                    }
-                }
-              },
+            modifier = Modifier.fillMaxSize().segmentGestures(uiState.mode, viewModel),
           )
           MaskOverlay(uiState.phase)
-          if (uiState.videoAspectRatio <= 0f) {
+          if (uiState.sourceAspectRatio <= 0f) {
             // Video is still buffering; the surface underneath is already attached so playback
             // can start.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -281,6 +274,41 @@ class StickerCreationActivity : ComponentActivity() {
       }
     }
   }
+
+  /**
+   * Long-press gestures shared by the photo and video surfaces: a long-press cuts a static
+   * sticker; in animated mode, holding records until the finger lifts, tracking it meanwhile.
+   */
+  private fun Modifier.segmentGestures(
+    mode: StickerMode,
+    viewModel: StickerCreationViewModel,
+  ): Modifier =
+    this.pointerInput(mode) {
+      when (mode) {
+        StickerMode.STATIC ->
+          detectTapGestures(
+            onLongPress = { offset ->
+              mapToVideoPoint(offset)?.let { viewModel.createStaticSticker(it) }
+            }
+          )
+        StickerMode.ANIMATED ->
+          awaitEachGesture {
+            val down = awaitFirstDown()
+            val longPress = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+            val startPoint = mapToVideoPoint(longPress.position) ?: return@awaitEachGesture
+            viewModel.startRecording(startPoint)
+            try {
+              drag(longPress.id) { change ->
+                mapToVideoPoint(change.position)?.let { viewModel.updateFingerPosition(it) }
+                change.consume()
+              }
+            } finally {
+              // Finger lifted or the gesture was cancelled; drain the capture loop.
+              viewModel.stopRecording()
+            }
+          }
+      }
+    }
 
   @Composable
   private fun MaskOverlay(phase: CreationPhase) {
