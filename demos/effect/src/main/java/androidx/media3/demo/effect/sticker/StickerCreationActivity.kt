@@ -213,18 +213,22 @@ class StickerCreationActivity : ComponentActivity() {
           .background(Color.Black),
       contentAlignment = Alignment.Center,
     ) {
-      if (uiState.videoAspectRatio > 0f) {
+      run {
         // Sizing the TextureView to the video's aspect ratio keeps the surface undistorted and
         // free of letterbox bars; taps map to normalized coordinates via the exact-fit path of
-        // VideoCoordinateMapper.
-        Box(modifier = Modifier.aspectRatio(uiState.videoAspectRatio)) {
+        // VideoCoordinateMapper. The surface must exist BEFORE the aspect ratio is known: the
+        // player only decodes video (and thus reports its size) once it has an output surface,
+        // so an unknown ratio renders at a 16:9 placeholder until onVideoSizeChanged corrects it.
+        val aspectRatio =
+          if (uiState.videoAspectRatio > 0f) uiState.videoAspectRatio else DEFAULT_ASPECT_RATIO
+        Box(modifier = Modifier.aspectRatio(aspectRatio)) {
           AndroidView(
             factory = { context -> TextureView(context) },
             update = { textureView ->
               viewModel.player.setVideoTextureView(textureView)
               viewModel.attachFrameSource { reuse ->
                 if (textureView.isAvailable) {
-                  textureView.getBitmap(reuse ?: createCaptureBitmap(uiState.videoAspectRatio))
+                  textureView.getBitmap(reuse ?: createCaptureBitmap(aspectRatio))
                 } else {
                   null
                 }
@@ -266,9 +270,14 @@ class StickerCreationActivity : ComponentActivity() {
               },
           )
           MaskOverlay(uiState.phase)
+          if (uiState.videoAspectRatio <= 0f) {
+            // Video is still buffering; the surface underneath is already attached so playback
+            // can start.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              CircularProgressIndicator(color = MaterialTheme.colorScheme.onSurface)
+            }
+          }
         }
-      } else {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.onSurface)
       }
     }
   }
@@ -404,6 +413,11 @@ class StickerCreationActivity : ComponentActivity() {
       tapX = position.x,
       tapY = position.y,
     )
+
+  private companion object {
+    /** Placeholder surface aspect until the video reports its real size. */
+    const val DEFAULT_ASPECT_RATIO = 16f / 9f
+  }
 
   /** Allocates a capture bitmap capped at [StickerCreationViewModel.CAPTURE_MAX_DIMENSION]. */
   private fun createCaptureBitmap(aspectRatio: Float): Bitmap {

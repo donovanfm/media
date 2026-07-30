@@ -79,4 +79,5 @@
   <string name="sticker_error_frame_capture">Could not capture a video frame.</string>
   <string name="sticker_error_empty_mask">No object found there. Try another spot.</string>
   <string name="sticker_error_save">Could not save the sticker.</string>
+  <string name="sticker_error_playback">Video playback failed.</string>
 </resources>

@@ -24,6 +24,7 @@ import androidx.core.graphics.createBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -84,6 +85,12 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
                 0f
               }
             _uiState.update { it.copy(videoAspectRatio = aspectRatio) }
+          }
+
+          override fun onPlayerError(error: PlaybackException) {
+            _uiState.update {
+              it.copy(errorMessage = getString(R.string.sticker_error_playback))
+            }
           }
         }
       )
