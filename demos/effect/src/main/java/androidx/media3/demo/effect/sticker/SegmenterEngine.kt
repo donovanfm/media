@@ -17,6 +17,7 @@ package androidx.media3.demo.effect.sticker
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.ByteBufferExtractor
 import com.google.mediapipe.framework.image.MPImage
@@ -82,10 +83,12 @@ internal class SegmenterEngine(
         segmenter = createSegmenter(Delegate.GPU)
         isGpuAccelerated = true
       } catch (e: RuntimeException) {
+        Log.i(TAG, "GPU delegate unavailable, falling back to CPU", e)
         try {
           segmenter = createSegmenter(Delegate.CPU)
           isGpuAccelerated = false
         } catch (e2: RuntimeException) {
+          Log.e(TAG, "Failed to initialize InteractiveSegmenter", e2)
           throw SegmentationException("Failed to initialize InteractiveSegmenter", e2)
         }
       }
@@ -96,6 +99,11 @@ internal class SegmenterEngine(
    * Segments the object in [frame] at the normalized point ([x], [y]) and returns its confidence
    * mask. The point is submitted as a single-point positive brush stroke.
    *
+   * GPU inference is only initialized by the graph on the first segmentation — creating the
+   * segmenter with the GPU delegate can succeed on devices whose GL can't actually run the model
+   * (emulators, notably). A failure on the GPU path therefore recreates the segmenter on CPU and
+   * retries once.
+   *
    * Serialized on the engine thread. Throws [SegmentationException] on MediaPipe errors and
    * [CancellationException] when the engine is closed or unprepared.
    */
@@ -104,22 +112,45 @@ internal class SegmenterEngine(
       val segmenter =
         this@SegmenterEngine.segmenter ?: throw CancellationException("SegmenterEngine is closed")
       try {
-        segmenter.setImage(BitmapImageBuilder(frame).build())
-        val mask =
-          segmenter.segment(
-            listOf(
-              Stroke.builder()
-                .setBrushMode(Stroke.BrushMode.POSITIVE)
-                .setPoints(listOf(NormalizedKeypoint.create(x, y)))
-                .setCompleted(true)
-                .build()
-            )
-          )
-        toConfidenceMask(mask)
+        runSegmentation(segmenter, frame, x, y)
       } catch (e: RuntimeException) {
-        throw SegmentationException("Segmentation failed", e)
+        if (!isGpuAccelerated) {
+          Log.e(TAG, "Segmentation failed", e)
+          throw SegmentationException("Segmentation failed", e)
+        }
+        Log.i(TAG, "GPU inference failed, recreating segmenter with the CPU delegate", e)
+        try {
+          segmenter.close()
+          val cpuSegmenter = createSegmenter(Delegate.CPU)
+          this@SegmenterEngine.segmenter = cpuSegmenter
+          isGpuAccelerated = false
+          runSegmentation(cpuSegmenter, frame, x, y)
+        } catch (e2: RuntimeException) {
+          Log.e(TAG, "Segmentation failed", e2)
+          throw SegmentationException("Segmentation failed", e2)
+        }
       }
     }
+  }
+
+  private fun runSegmentation(
+    segmenter: InteractiveSegmenter,
+    frame: Bitmap,
+    x: Float,
+    y: Float,
+  ): ConfidenceMask {
+    segmenter.setImage(BitmapImageBuilder(frame).build())
+    val mask =
+      segmenter.segment(
+        listOf(
+          Stroke.builder()
+            .setBrushMode(Stroke.BrushMode.POSITIVE)
+            .setPoints(listOf(NormalizedKeypoint.create(x, y)))
+            .setCompleted(true)
+            .build()
+        )
+      )
+    return toConfidenceMask(mask)
   }
 
   /**
@@ -174,6 +205,10 @@ internal class SegmenterEngine(
   }
 
   private companion object {
-    const val MODEL_ASSET_PATH = "magic_touch.tflite"
+    const val TAG = "SegmenterEngine"
+    // The v2 task bundle required by the tasks-vision 1.0 InteractiveSegmenter (the legacy
+    // magic_touch.tflite only works with InteractiveSegmenterLegacy). Downloaded at build time;
+    // see downloadSegmenterModel in build.gradle.kts.
+    const val MODEL_ASSET_PATH = "interactive_segmentation.task"
   }
 }

@@ -60,9 +60,11 @@ android {
  */
 val downloadSegmenterModel by
   tasks.registering {
+    // The tasks-vision 1.0 InteractiveSegmenter requires the v2 .task bundle; the older
+    // magic_touch.tflite only works with InteractiveSegmenterLegacy.
     val modelUrl =
-      "https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite"
-    val outputFile = layout.buildDirectory.file("downloadedAssets/magic_touch.tflite")
+      "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task"
+    val outputFile = layout.buildDirectory.file("downloadedAssets/interactive_segmentation.task")
     outputs.file(outputFile)
     onlyIf { !outputFile.get().asFile.exists() }
     doLast {

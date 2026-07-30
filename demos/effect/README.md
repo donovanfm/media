@@ -20,12 +20,15 @@ this demo.
 
 * This demo requires `minSdk` 24 (the rest of the repository builds against
   23) because of the MediaPipe `tasks-vision` dependency.
-* The MediaPipe interactive segmentation model (`magic_touch.tflite`, ~6 MB)
-  is downloaded automatically on first build by the `downloadSegmenterModel`
-  Gradle task and cached in the build directory. When building offline,
-  download it manually from
-  https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite
-  and place it at `demos/effect/buildout/downloadedAssets/magic_touch.tflite`.
+* The MediaPipe interactive segmentation model bundle
+  (`interactive_segmentation.task`) is downloaded automatically on first build
+  by the `downloadSegmenterModel` Gradle task and cached in the build
+  directory. When building offline, download it manually from
+  https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task
+  and place it at
+  `demos/effect/buildout/downloadedAssets/interactive_segmentation.task`.
+  (The legacy `magic_touch.tflite` only works with `InteractiveSegmenterLegacy`,
+  not the tasks-vision 1.0 API this demo uses.)
 
 [Effect]: https://github.com/androidx/media/tree/release/libraries/effect
 [ExoPlayer]: https://github.com/androidx/media/tree/release/libraries/exoplayer
