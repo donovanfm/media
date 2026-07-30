@@ -19,6 +19,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.graphics.createBitmap
 import androidx.lifecycle.AndroidViewModel
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * ViewModel for the sticker creation screen.
@@ -230,50 +232,59 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
         val recorder = StickerFrameRecorder()
         val startTimeNs = SystemClock.elapsedRealtimeNanos()
         var reusableFrame: Bitmap? = null
+        var framePixels: IntArray? = null
         _uiState.update { it.copy(phase = CreationPhase.Recording(0)) }
-        try {
-          while (isActive && !recorder.isFull) {
-            val fingerPoint = latestPoint ?: break
-            val frame = frameSource?.captureFrame(reusableFrame) ?: break
-            reusableFrame = frame
-            val timestampUs = (SystemClock.elapsedRealtimeNanos() - startTimeNs) / 1000
-            val mask = segmenterEngine.segment(frame, fingerPoint.x, fingerPoint.y)
-            if (mask.width != frame.width || mask.height != frame.height) {
-              continue
+        while (isActive && !recorder.isFull) {
+          val fingerPoint = latestPoint ?: break
+          val frame = frameSource?.captureFrame(reusableFrame) ?: break
+          reusableFrame = frame
+          val timestampUs = (SystemClock.elapsedRealtimeNanos() - startTimeNs) / 1000
+          // A failed or timed-out segmentation ends the recording but keeps the frames captured
+          // so far — better a short sticker than a discarded one. The timeout also protects the
+          // UI from a wedged native call (segment() abandons the wait; the engine thread keeps
+          // running the call in the background).
+          val mask =
+            try {
+              withTimeoutOrNull(SEGMENT_TIMEOUT_MS) {
+                segmenterEngine.segment(frame, fingerPoint.x, fingerPoint.y)
+              }
+            } catch (e: SegmenterEngine.SegmentationException) {
+              null
             }
-            withContext(Dispatchers.Default) {
-              val alphaMask =
-                SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
-              val framePixels = IntArray(frame.width * frame.height)
-              frame.getPixels(framePixels, 0, frame.width, 0, 0, frame.width, frame.height)
-              recorder.addFrame(framePixels, frame.width, alphaMask, timestampUs)
-            }
-            _uiState.update { it.copy(phase = CreationPhase.Recording(recorder.frameCount)) }
+          if (mask == null) {
+            Log.w(TAG, "Segmentation failed or timed out; ending recording early")
+            break
           }
-          player.pause()
-          val composed = withContext(Dispatchers.Default) { recorder.composeFrames() }
-          if (composed == null) {
-            _uiState.update {
-              it.copy(
-                phase = CreationPhase.Playing,
-                errorMessage = getString(R.string.sticker_error_empty_mask),
-              )
-            }
-            player.play()
-          } else {
-            pendingAnimated = composed
-            _uiState.update {
-              it.copy(phase = CreationPhase.AnimatedPreview(composed.toAnimatedSticker()))
-            }
+          if (mask.width != frame.width || mask.height != frame.height) {
+            Log.w(TAG, "Mask ${mask.width}x${mask.height} != frame ${frame.width}x${frame.height}")
+            break
           }
-        } catch (e: SegmenterEngine.SegmentationException) {
+          val pixels =
+            framePixels?.takeIf { it.size == frame.width * frame.height }
+              ?: IntArray(frame.width * frame.height).also { framePixels = it }
+          withContext(Dispatchers.Default) {
+            val alphaMask =
+              SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
+            frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+            recorder.addFrame(pixels, frame.width, alphaMask, timestampUs)
+          }
+          _uiState.update { it.copy(phase = CreationPhase.Recording(recorder.frameCount)) }
+        }
+        player.pause()
+        val composed = withContext(Dispatchers.Default) { recorder.composeFrames() }
+        if (composed == null) {
           _uiState.update {
             it.copy(
               phase = CreationPhase.Playing,
-              errorMessage = getString(R.string.sticker_error_segmentation),
+              errorMessage = getString(R.string.sticker_error_empty_mask),
             )
           }
           player.play()
+        } else {
+          pendingAnimated = composed
+          _uiState.update {
+            it.copy(phase = CreationPhase.AnimatedPreview(composed.toAnimatedSticker()))
+          }
         }
       }
   }
@@ -389,7 +400,12 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   private fun getString(resId: Int): String = getApplication<Application>().getString(resId)
 
   companion object {
+    private const val TAG = "StickerCreation"
+
     /** Long-edge cap for captured frames; segmentation runs at 512px internally anyway. */
     const val CAPTURE_MAX_DIMENSION = 640
+
+    /** Watchdog for a single segmentation; generous even for cold-start CPU inference. */
+    private const val SEGMENT_TIMEOUT_MS = 5_000L
   }
 }

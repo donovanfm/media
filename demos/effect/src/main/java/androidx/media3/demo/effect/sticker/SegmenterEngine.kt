@@ -30,8 +30,11 @@ import com.google.mediapipe.tasks.vision.interactivesegmenter.Stroke
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.Executors
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /**
@@ -104,30 +107,40 @@ internal class SegmenterEngine(
    * (emulators, notably). A failure on the GPU path therefore recreates the segmenter on CPU and
    * retries once.
    *
-   * Serialized on the engine thread. Throws [SegmentationException] on MediaPipe errors and
-   * [CancellationException] when the engine is closed or unprepared.
+   * Serialized on the engine thread, but the suspension itself is cancellable: wrapping a call in
+   * `withTimeout` abandons the wait (the native call keeps running on the engine thread and its
+   * eventual result is discarded), so a wedged native call can't hang the caller.
+   *
+   * Throws [SegmentationException] on MediaPipe errors and [CancellationException] when the
+   * engine is closed or unprepared.
    */
   suspend fun segment(frame: Bitmap, x: Float, y: Float): ConfidenceMask {
-    return withContext(dispatcher) {
-      val segmenter =
-        this@SegmenterEngine.segmenter ?: throw CancellationException("SegmenterEngine is closed")
-      try {
-        runSegmentation(segmenter, frame, x, y)
-      } catch (e: RuntimeException) {
-        if (!isGpuAccelerated) {
-          Log.e(TAG, "Segmentation failed", e)
-          throw SegmentationException("Segmentation failed", e)
+    return suspendCancellableCoroutine { continuation ->
+      executor.execute {
+        val segmenter = this.segmenter
+        if (closed || segmenter == null) {
+          continuation.cancel(CancellationException("SegmenterEngine is closed"))
+          return@execute
         }
-        Log.i(TAG, "GPU inference failed, recreating segmenter with the CPU delegate", e)
         try {
-          segmenter.close()
-          val cpuSegmenter = createSegmenter(Delegate.CPU)
-          this@SegmenterEngine.segmenter = cpuSegmenter
-          isGpuAccelerated = false
-          runSegmentation(cpuSegmenter, frame, x, y)
-        } catch (e2: RuntimeException) {
-          Log.e(TAG, "Segmentation failed", e2)
-          throw SegmentationException("Segmentation failed", e2)
+          continuation.resume(runSegmentation(segmenter, frame, x, y))
+        } catch (e: RuntimeException) {
+          if (!isGpuAccelerated) {
+            Log.e(TAG, "Segmentation failed", e)
+            continuation.resumeWithException(SegmentationException("Segmentation failed", e))
+            return@execute
+          }
+          Log.i(TAG, "GPU inference failed, recreating segmenter with the CPU delegate", e)
+          try {
+            segmenter.close()
+            val cpuSegmenter = createSegmenter(Delegate.CPU)
+            this.segmenter = cpuSegmenter
+            isGpuAccelerated = false
+            continuation.resume(runSegmentation(cpuSegmenter, frame, x, y))
+          } catch (e2: RuntimeException) {
+            Log.e(TAG, "Segmentation failed", e2)
+            continuation.resumeWithException(SegmentationException("Segmentation failed", e2))
+          }
         }
       }
     }
@@ -139,6 +152,8 @@ internal class SegmenterEngine(
     x: Float,
     y: Float,
   ): ConfidenceMask {
+    // Don't close the input image: closing a bitmap-backed MPImage recycles the bitmap, which the
+    // caller reuses for the next capture.
     segmenter.setImage(BitmapImageBuilder(frame).build())
     val mask =
       segmenter.segment(
@@ -150,7 +165,14 @@ internal class SegmenterEngine(
             .build()
         )
       )
-    return toConfidenceMask(mask)
+    // The mask is backed by a fixed-size native buffer pool. It MUST be closed after its data is
+    // copied out, or the pool runs dry and a later segment() call blocks forever inside native
+    // code (in practice: recording froze after ~3 frames).
+    return try {
+      toConfidenceMask(mask)
+    } finally {
+      mask.close()
+    }
   }
 
   /**
@@ -181,27 +203,27 @@ internal class SegmenterEngine(
 
   /**
    * Normalizes the returned mask image to floats in [0, 1], accepting either a float
-   * (VEC32F1-style) or 8-bit alpha buffer.
+   * (VEC32F1-style) or 8-bit alpha buffer. Always copies to the heap: the source buffer belongs
+   * to the mask image, which the caller closes immediately afterwards.
    */
   private fun toConfidenceMask(mask: MPImage): ConfidenceMask {
     val pixelCount = mask.width * mask.height
     val buffer = ByteBufferExtractor.extract(mask).order(ByteOrder.nativeOrder())
-    return when (buffer.capacity()) {
-      pixelCount * Float.SIZE_BYTES ->
-        ConfidenceMask(buffer.asFloatBuffer(), mask.width, mask.height)
+    val floats = FloatBuffer.allocate(pixelCount)
+    when (buffer.capacity()) {
+      pixelCount * Float.SIZE_BYTES -> floats.put(buffer.asFloatBuffer())
       pixelCount -> {
-        val floats = FloatBuffer.allocate(pixelCount)
         for (i in 0 until pixelCount) {
           floats.put((buffer.get(i).toInt() and 0xFF) / 255f)
         }
-        floats.rewind()
-        ConfidenceMask(floats, mask.width, mask.height)
       }
       else ->
         throw SegmentationException(
           "Unexpected mask buffer: ${buffer.capacity()} bytes for $pixelCount pixels"
         )
     }
+    floats.rewind()
+    return ConfidenceMask(floats, mask.width, mask.height)
   }
 
   private companion object {
