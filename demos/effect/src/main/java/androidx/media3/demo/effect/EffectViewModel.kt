@@ -39,6 +39,7 @@ import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.sticker.StickerRepository
+import androidx.media3.demo.effect.sticker.trimmedToOpaqueBounds
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
@@ -163,11 +164,18 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             val bitmaps = buildMap {
               for (asset in allAssets) {
                 when (asset) {
+                  // Bundled images and stickers saved before trimming existed may carry
+                  // transparent borders that keep their content off the video edges; trim at
+                  // load. Animated first frames must NOT be trimmed: their dimensions have to
+                  // match the saved animation frames or placement and playback disagree on size.
                   is StickerAsset.Bundled ->
                     getApplication<Application>().assets.open(asset.assetPath).use { stream ->
-                      BitmapFactory.decodeStream(stream)?.let { put(asset.id, it) }
+                      BitmapFactory.decodeStream(stream)?.let {
+                        put(asset.id, it.trimmedToOpaqueBounds())
+                      }
                     }
-                  is StickerAsset.Static -> put(asset.id, stickerRepository.loadBitmap(asset))
+                  is StickerAsset.Static ->
+                    put(asset.id, stickerRepository.loadBitmap(asset).trimmedToOpaqueBounds())
                   is StickerAsset.Animated ->
                     put(asset.id, stickerRepository.loadFirstFrame(asset))
                 }

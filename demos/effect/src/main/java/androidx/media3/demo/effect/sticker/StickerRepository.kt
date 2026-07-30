@@ -52,15 +52,20 @@ internal class StickerRepository(
   private val staticDir = File(context.filesDir, "stickers/static")
   private val animatedDir = File(context.filesDir, "stickers/animated")
 
-  /** Saves [sticker] as a new static sticker named [name] and returns its asset. */
+  /**
+   * Saves [sticker] as a new static sticker named [name] and returns its asset. The sticker is
+   * trimmed to its non-transparent bounds first so its visible content can be placed flush
+   * against the video edges.
+   */
   suspend fun saveStatic(sticker: Bitmap, name: String): StickerAsset.Static {
     return withContext(ioDispatcher) {
+      val trimmed = sticker.trimmedToOpaqueBounds()
       staticDir.mkdirs()
       val id = newStickerId()
       val imageFile = File(staticDir, "$id.png")
       try {
         imageFile.outputStream().use { output ->
-          if (!sticker.compress(Bitmap.CompressFormat.PNG, /* quality= */ 100, output)) {
+          if (!trimmed.compress(Bitmap.CompressFormat.PNG, /* quality= */ 100, output)) {
             throw IOException("PNG compression failed")
           }
         }
@@ -77,12 +82,14 @@ internal class StickerRepository(
   /**
    * Saves a composed animation as a new animated sticker named [name]: one WebP per frame plus a
    * manifest, written into a temp directory and renamed into place so partial writes never
-   * surface as broken stickers.
+   * surface as broken stickers. The animation is trimmed to the union of its frames'
+   * non-transparent bounds first (a uniform crop, so frame size stays constant).
    */
   suspend fun saveAnimated(
     animation: StickerFrameRecorder.ComposedAnimation,
     name: String,
   ): StickerAsset.Animated {
+    @Suppress("NAME_SHADOWING") val animation = animation.trimmedToOpaqueBounds()
     return withContext(ioDispatcher) {
       animatedDir.mkdirs()
       val id = newStickerId()

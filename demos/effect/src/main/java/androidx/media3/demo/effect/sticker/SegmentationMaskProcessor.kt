@@ -107,6 +107,48 @@ internal object SegmentationMaskProcessor {
   }
 
   /**
+   * Returns the bounding box of the pixels with non-zero alpha in row-major ARGB [pixels], or
+   * null when every pixel is fully transparent. Used to trim transparent borders off stickers so
+   * their visible content can be placed flush against the video edges.
+   */
+  fun opaqueBounds(pixels: IntArray, width: Int, height: Int): Bbox? {
+    require(pixels.size == width * height) {
+      "Pixels (${pixels.size}) don't match dimensions ${width}x$height"
+    }
+    var left = Int.MAX_VALUE
+    var top = Int.MAX_VALUE
+    var right = Int.MIN_VALUE
+    var bottom = Int.MIN_VALUE
+    for (y in 0 until height) {
+      val rowOffset = y * width
+      for (x in 0 until width) {
+        if (pixels[rowOffset + x] ushr 24 != 0) {
+          if (x < left) left = x
+          if (x > right) right = x
+          if (y < top) top = y
+          if (y > bottom) bottom = y
+        }
+      }
+    }
+    return if (right >= left && bottom >= top) Bbox(left, top, right, bottom) else null
+  }
+
+  /** Crops row-major ARGB [pixels] of width [width] to [bbox]. */
+  fun cropPixels(pixels: IntArray, width: Int, bbox: Bbox): IntArray {
+    val out = IntArray(bbox.width * bbox.height)
+    for (y in 0 until bbox.height) {
+      System.arraycopy(
+        pixels,
+        (bbox.top + y) * width + bbox.left,
+        out,
+        y * bbox.width,
+        bbox.width,
+      )
+    }
+    return out
+  }
+
+  /**
    * Cuts the masked object out of a frame: pixels are cropped to the mask's bounding box, keeping
    * the frame's RGB with alpha taken from the mask. Returns null when the mask is empty.
    *

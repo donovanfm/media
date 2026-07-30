@@ -149,4 +149,56 @@ class StickerFrameRecorderTest {
     assertThat(composed!!.timestampsUs).asList().containsExactly(0L)
     assertThat(composed.durationUs).isEqualTo(1_000_000)
   }
+
+  // --- trimmedToOpaqueBounds ---
+
+  @Test
+  fun trimmedToOpaqueBounds_cropsSharedTransparentBorder() {
+    val red = (0xFF shl 24) or 0xFF0000
+    val green = (0xFF shl 24) or 0x00FF00
+    // Two 4x4 frames whose content occupies (1,1) and (2,2) respectively: the union crop is
+    // (1,1)..(2,2), preserving each object's position relative to the other frame's.
+    val frame0 = IntArray(16).also { it[1 * 4 + 1] = red }
+    val frame1 = IntArray(16).also { it[2 * 4 + 2] = green }
+    val animation =
+      StickerFrameRecorder.ComposedAnimation(
+        frames = listOf(frame0, frame1),
+        width = 4,
+        height = 4,
+        timestampsUs = longArrayOf(0, 100_000),
+        durationUs = 200_000,
+      )
+
+    val trimmed = animation.trimmedToOpaqueBounds()
+
+    assertThat(trimmed.width).isEqualTo(2)
+    assertThat(trimmed.height).isEqualTo(2)
+    assertThat(trimmed.timestampsUs).isEqualTo(animation.timestampsUs)
+    assertThat(trimmed.durationUs).isEqualTo(animation.durationUs)
+    assertThat(trimmed.frames[0][0]).isEqualTo(red) // was (1,1)
+    assertThat(trimmed.frames[1][1 * 2 + 1]).isEqualTo(green) // was (2,2)
+  }
+
+  @Test
+  fun trimmedToOpaqueBounds_alreadyTight_returnsSameInstance() {
+    val recorder = StickerFrameRecorder()
+    recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(0, 0, frameWidth - 1, 7), 0)
+    val composed = recorder.composeFrames()!!
+
+    assertThat(composed.trimmedToOpaqueBounds()).isSameInstanceAs(composed)
+  }
+
+  @Test
+  fun trimmedToOpaqueBounds_fullyTransparent_returnsSameInstance() {
+    val animation =
+      StickerFrameRecorder.ComposedAnimation(
+        frames = listOf(IntArray(16)),
+        width = 4,
+        height = 4,
+        timestampsUs = longArrayOf(0),
+        durationUs = 100_000,
+      )
+
+    assertThat(animation.trimmedToOpaqueBounds()).isSameInstanceAs(animation)
+  }
 }

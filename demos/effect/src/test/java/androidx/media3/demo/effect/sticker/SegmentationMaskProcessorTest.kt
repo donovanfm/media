@@ -137,4 +137,43 @@ class SegmentationMaskProcessorTest {
 
     SegmentationMaskProcessor.cutout(IntArray(9), 3, mask)
   }
+
+  // --- opaqueBounds / cropPixels ---
+
+  @Test
+  fun opaqueBounds_transparentBorder_returnsTightBox() {
+    // 4x4, opaque pixels only at (1,1) and (2,2).
+    val pixels = IntArray(16)
+    pixels[1 * 4 + 1] = 0xFFFF0000.toInt()
+    pixels[2 * 4 + 2] = 0x01000000 // barely visible still counts as non-transparent
+
+    val bounds = SegmentationMaskProcessor.opaqueBounds(pixels, 4, 4)
+
+    assertThat(bounds).isEqualTo(SegmentationMaskProcessor.Bbox(1, 1, 2, 2))
+  }
+
+  @Test
+  fun opaqueBounds_noTransparentBorder_returnsFullBox() {
+    val pixels = IntArray(6) { 0xFF00FF00.toInt() }
+
+    val bounds = SegmentationMaskProcessor.opaqueBounds(pixels, 3, 2)
+
+    assertThat(bounds).isEqualTo(SegmentationMaskProcessor.Bbox(0, 0, 2, 1))
+  }
+
+  @Test
+  fun opaqueBounds_fullyTransparent_returnsNull() {
+    assertThat(SegmentationMaskProcessor.opaqueBounds(IntArray(9), 3, 3)).isNull()
+  }
+
+  @Test
+  fun cropPixels_extractsBoxContents() {
+    // 3x3 with distinct values; crop the center-right 2x1 box.
+    val pixels = IntArray(9) { it }
+    val bbox = SegmentationMaskProcessor.Bbox(1, 1, 2, 1)
+
+    val cropped = SegmentationMaskProcessor.cropPixels(pixels, 3, bbox)
+
+    assertThat(cropped).asList().containsExactly(4, 5).inOrder()
+  }
 }

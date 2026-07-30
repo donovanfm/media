@@ -75,7 +75,34 @@ internal class StickerFrameRecorder(
     val height: Int,
     val timestampsUs: LongArray,
     val durationUs: Long,
-  )
+  ) {
+
+    /**
+     * Returns this animation cropped to the tightest box containing every frame's non-transparent
+     * pixels. All frames are cropped by the same rect, so the frame size stays constant (stable
+     * overlay anchoring) and the object's motion within the sticker is preserved — only borders
+     * that are transparent in EVERY frame are removed, letting the visible content reach the
+     * video edges during placement.
+     */
+    fun trimmedToOpaqueBounds(): ComposedAnimation {
+      var union: SegmentationMaskProcessor.Bbox? = null
+      for (frame in frames) {
+        val bounds = SegmentationMaskProcessor.opaqueBounds(frame, width, height) ?: continue
+        union = union?.union(bounds) ?: bounds
+      }
+      val bounds = union ?: return this
+      if (bounds.width == width && bounds.height == height) {
+        return this
+      }
+      return ComposedAnimation(
+        frames.map { SegmentationMaskProcessor.cropPixels(it, width, bounds) },
+        bounds.width,
+        bounds.height,
+        timestampsUs,
+        durationUs,
+      )
+    }
+  }
 
   /**
    * Composes the recorded cutouts into constant-size frames, downscaled (nearest-neighbor) so
