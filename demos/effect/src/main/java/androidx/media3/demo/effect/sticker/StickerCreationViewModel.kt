@@ -504,8 +504,9 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   companion object {
     private const val TAG = "StickerCreation"
 
-    /** Long-edge cap for captured frames; segmentation runs at 512px internally anyway. */
-    const val CAPTURE_MAX_DIMENSION = 640
+    /** Long-edge cap for captured frames, matching the model's 512px input so per-frame resizes
+     * and pixel copies don't pay for resolution segmentation can't use. */
+    const val CAPTURE_MAX_DIMENSION = 512
 
     /** Watchdog for a single segmentation; generous even for cold-start CPU inference. */
     private const val SEGMENT_TIMEOUT_MS = 5_000L

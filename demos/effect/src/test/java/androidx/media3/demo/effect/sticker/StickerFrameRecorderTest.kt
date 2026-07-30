@@ -150,6 +150,22 @@ class StickerFrameRecorderTest {
     assertThat(composed.durationUs).isEqualTo(1_000_000)
   }
 
+  @Test
+  fun addFrame_areaOutliers_rejected() {
+    val recorder = StickerFrameRecorder()
+    // Two accepted 3x3-object frames (9 opaque pixels) establish the median.
+    assertThat(recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(0, 0, 2, 2), 0)).isTrue()
+    assertThat(recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(0, 0, 2, 2), 10)).isTrue()
+
+    // A 1-pixel frame (area collapse: segmentation lost the subject) is rejected...
+    assertThat(recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(5, 5, 5, 5), 20)).isFalse()
+    // ...as is a 8x8 whole-frame flash (64 opaque pixels > 9 * 4)...
+    assertThat(recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(0, 0, 7, 7), 30)).isFalse()
+    // ...while a similar-sized frame (2x3 = 6 opaque pixels) is accepted.
+    assertThat(recorder.addFrame(framePixels(0xFF0000), frameWidth, mask(0, 0, 1, 2), 40)).isTrue()
+    assertThat(recorder.frameCount).isEqualTo(3)
+  }
+
   // --- trimmedToOpaqueBounds ---
 
   @Test

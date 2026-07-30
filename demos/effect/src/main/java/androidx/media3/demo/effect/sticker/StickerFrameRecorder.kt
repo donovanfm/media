@@ -38,6 +38,7 @@ internal class StickerFrameRecorder(
   private class RecordedFrame(val pixels: IntArray, val bbox: Bbox, val timestampUs: Long)
 
   private val frames = mutableListOf<RecordedFrame>()
+  private val acceptedOpaqueCounts = mutableListOf<Int>()
   private var unionBbox: Bbox? = null
   private var recordedBytes = 0L
 
@@ -50,7 +51,7 @@ internal class StickerFrameRecorder(
 
   /**
    * Cuts the object out of the frame with [mask] and stores it at [timestampUs]. Returns false —
-   * storing nothing — when the mask is empty or a cap has been reached.
+   * storing nothing — when the mask is empty, the frame is an outlier, or a cap has been reached.
    */
   fun addFrame(
     framePixels: IntArray,
@@ -62,10 +63,29 @@ internal class StickerFrameRecorder(
       return false
     }
     val cutout = SegmentationMaskProcessor.cutout(framePixels, frameWidth, mask) ?: return false
+    if (isOutlier(cutout.opaquePixelCount)) {
+      return false
+    }
     frames += RecordedFrame(cutout.pixels, cutout.bbox, timestampUs)
+    acceptedOpaqueCounts += cutout.opaquePixelCount
     unionBbox = unionBbox?.union(cutout.bbox) ?: cutout.bbox
     recordedBytes += cutout.pixels.size * 4L
     return true
+  }
+
+  /**
+   * Per-frame segmentation has no temporal consistency: an occasional frame loses the subject and
+   * returns a near-empty (or whole-frame) mask, which would bake a blank or flashing frame into
+   * the sticker. Frames whose visible area is far from the median of the accepted frames are
+   * rejected; playback timestamps naturally hold the previous frame across the gap.
+   */
+  private fun isOutlier(opaquePixelCount: Int): Boolean {
+    if (acceptedOpaqueCounts.size < MIN_FRAMES_FOR_OUTLIER_REJECTION) {
+      return false
+    }
+    val median = acceptedOpaqueCounts.sorted()[acceptedOpaqueCounts.size / 2]
+    return opaquePixelCount * OUTLIER_AREA_FACTOR < median ||
+      opaquePixelCount > median * OUTLIER_AREA_FACTOR
   }
 
   /** A composed animation: constant-size ARGB frames with timestamps rebased to start at 0. */
@@ -156,5 +176,7 @@ internal class StickerFrameRecorder(
     const val DEFAULT_MAX_BYTES = 64L shl 20
     const val DEFAULT_COMPOSE_MAX_DIMENSION = 512
     private const val SINGLE_FRAME_DURATION_US = 1_000_000L
+    private const val MIN_FRAMES_FOR_OUTLIER_REJECTION = 2
+    private const val OUTLIER_AREA_FACTOR = 4
   }
 }

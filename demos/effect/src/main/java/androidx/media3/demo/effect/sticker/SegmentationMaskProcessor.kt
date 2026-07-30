@@ -52,8 +52,12 @@ internal object SegmentationMaskProcessor {
    */
   class AlphaMask(val alpha: ByteArray, val width: Int, val height: Int, val bbox: Bbox?)
 
-  /** A cutout: ARGB pixels of size [bbox].width x [bbox].height. */
-  class Cutout(val pixels: IntArray, val bbox: Bbox)
+  /**
+   * A cutout: ARGB pixels of size [bbox].width x [bbox].height. [opaquePixelCount] is the number
+   * of non-transparent pixels — a cheap measure of the visible area, used to reject frames where
+   * segmentation lost the subject.
+   */
+  class Cutout(val pixels: IntArray, val bbox: Bbox, val opaquePixelCount: Int)
 
   /**
    * Converts a confidence buffer to an [AlphaMask] in a single pass.
@@ -161,6 +165,7 @@ internal object SegmentationMaskProcessor {
     }
     require(frameWidth == mask.width) { "Frame width $frameWidth != mask width ${mask.width}" }
     val out = IntArray(bbox.width * bbox.height)
+    var opaquePixelCount = 0
     for (y in 0 until bbox.height) {
       val srcRow = (bbox.top + y) * frameWidth
       val dstRow = y * bbox.width
@@ -169,9 +174,10 @@ internal object SegmentationMaskProcessor {
         val alpha = mask.alpha[srcIndex].toInt() and 0xFF
         if (alpha > 0) {
           out[dstRow + x] = (alpha shl 24) or (framePixels[srcIndex] and 0x00FFFFFF)
+          opaquePixelCount++
         }
       }
     }
-    return Cutout(out, bbox)
+    return Cutout(out, bbox, opaquePixelCount)
   }
 }
