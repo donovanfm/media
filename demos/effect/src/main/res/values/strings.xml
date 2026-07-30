@@ -52,6 +52,11 @@
   <string name="color_magenta">Magenta</string>
   <string name="sticker_overlay">Sticker Overlay</string>
   <string name="sticker_asset">Sticker</string>
+  <string name="sticker_animation">Animation</string>
+  <string name="sticker_animation_none">None</string>
+  <string name="sticker_animation_rock">Rock</string>
+  <string name="sticker_animation_pulse">Pulse</string>
+  <string name="sticker_animation_intensify">Intensify</string>
   <string name="place_sticker">Place sticker</string>
   <string name="placed_stickers">Placed stickers</string>
   <string name="edit">Edit</string>

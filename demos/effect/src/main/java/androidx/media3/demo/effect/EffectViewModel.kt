@@ -37,6 +37,7 @@ import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
+import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.sticker.StickerRepository
 import androidx.media3.demo.effect.sticker.trimmedToOpaqueBounds
@@ -347,6 +348,16 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
+   * Updates the preset placement animation applied to the next placed sticker. Like asset
+   * selection, this doesn't change already-applied effects by itself.
+   *
+   * @param animation The preset to use.
+   */
+  fun updateSelectedStickerAnimation(animation: StickerAnimation) {
+    _uiState.update { it.copy(selectedStickerAnimation = animation) }
+  }
+
+  /**
    * Records the measured size of the player box so placement can compute the video content rect.
    *
    * @param size The size of the player box in pixels.
@@ -409,6 +420,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
               contentRect = contentRect,
               videoPixelWidth = videoSize.width,
               animated = animated,
+              animation = _uiState.value.selectedStickerAnimation,
             )
         )
       }
@@ -441,6 +453,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             contentRect = sticker.contentRect,
             videoPixelWidth = sticker.videoPixelWidth,
             animated = sticker.animated,
+            animation = sticker.animation,
           ),
       )
     }
@@ -488,6 +501,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         contentRect = placing.contentRect,
         videoPixelWidth = placing.videoPixelWidth,
         animated = placing.animated,
+        animation = placing.animation,
       )
     _uiState.update {
       it.copy(
@@ -588,20 +602,36 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             sticker.contentRect.size,
             sticker.videoPixelWidth,
           )
-        val overlaySettings =
-          StaticOverlaySettings.Builder()
-            .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
-            .setScale(placement.scale, placement.scale)
-            .build()
+        val animated = sticker.animated
         overlaysBuilder.add(
-          sticker.animated?.let { animated ->
-            AnimatedStickerOverlay(
-              animated.frames,
-              animated.timestampsUs,
-              animated.durationUs,
-              overlaySettings,
-            )
-          } ?: BitmapOverlay.createStaticBitmapOverlay(sticker.bitmap, overlaySettings)
+          when {
+            animated != null ->
+              AnimatedStickerOverlay(
+                animated.frames,
+                animated.timestampsUs,
+                animated.durationUs,
+                sticker.animation,
+                placement.anchorX,
+                placement.anchorY,
+                placement.scale,
+              )
+            sticker.animation != StickerAnimation.NONE ->
+              AnimatedStickerOverlay.forStaticBitmap(
+                sticker.bitmap,
+                sticker.animation,
+                placement.anchorX,
+                placement.anchorY,
+                placement.scale,
+              )
+            else ->
+              BitmapOverlay.createStaticBitmapOverlay(
+                sticker.bitmap,
+                StaticOverlaySettings.Builder()
+                  .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
+                  .setScale(placement.scale, placement.scale)
+                  .build(),
+              )
+          }
         )
       }
     }

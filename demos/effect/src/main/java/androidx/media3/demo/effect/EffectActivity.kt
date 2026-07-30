@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.toSize
 import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.demo.effect.sticker.CreateStickerContract
+import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.ui.ColorsDropDownMenu
 import androidx.media3.demo.effect.ui.GenericExposedDropdownMenu
 import androidx.media3.demo.effect.ui.InputSelector
@@ -376,6 +377,15 @@ class EffectActivity : ComponentActivity() {
                 itemLabelProvider = { it.name },
               )
             }
+            GenericExposedDropdownMenu(
+              label = stringResource(R.string.sticker_animation),
+              selectedValue = uiState.selectedStickerAnimation,
+              options = StickerAnimation.entries,
+              onOptionSelected = { viewModel.updateSelectedStickerAnimation(it) },
+              modifier =
+                Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
+              itemLabelProvider = { stringResource(it.labelRes()) },
+            )
             Row(
               horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))
             ) {
@@ -499,3 +509,11 @@ class EffectActivity : ComponentActivity() {
 }
 
 private const val CONTROLS_VISIBILITY_TIMEOUT_MS = 3000L
+
+private fun StickerAnimation.labelRes(): Int =
+  when (this) {
+    StickerAnimation.NONE -> R.string.sticker_animation_none
+    StickerAnimation.ROCK -> R.string.sticker_animation_rock
+    StickerAnimation.PULSE -> R.string.sticker_animation_pulse
+    StickerAnimation.INTENSIFY -> R.string.sticker_animation_intensify
+  }

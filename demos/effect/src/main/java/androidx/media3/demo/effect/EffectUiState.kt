@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.media3.demo.effect.sticker.AnimatedSticker
+import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.ui.COLORS
 import com.google.common.collect.ImmutableList
@@ -45,6 +46,7 @@ internal data class EffectUiState(
   val stickerAssetsLoaded: Boolean = false,
   val stickerAssets: ImmutableList<StickerAsset> = ImmutableList.of(),
   val selectedStickerAssetId: String? = null,
+  val selectedStickerAnimation: StickerAnimation = StickerAnimation.NONE,
   val placedStickers: ImmutableList<PlacedSticker> = ImmutableList.of(),
   val stickerPlacement: StickerPlacement = StickerPlacement.Inactive,
   val playerBoxSize: Size = Size.Zero,
@@ -67,6 +69,8 @@ internal data class PlacedSticker(
   val videoPixelWidth: Int,
   /** Frames and timeline for animated stickers; null renders [bitmap] statically. */
   val animated: AnimatedSticker? = null,
+  /** Preset placement animation applied on top of the placed position. */
+  val animation: StickerAnimation = StickerAnimation.NONE,
 )
 
 /** Whether the user is currently positioning a sticker over the player. */
@@ -86,5 +90,7 @@ internal sealed interface StickerPlacement {
     val videoPixelWidth: Int,
     /** Frames and timeline when placing an animated sticker; the preview shows [bitmap]. */
     val animated: AnimatedSticker? = null,
+    /** Preset placement animation the sticker will be committed with. */
+    val animation: StickerAnimation = StickerAnimation.NONE,
   ) : StickerPlacement
 }
