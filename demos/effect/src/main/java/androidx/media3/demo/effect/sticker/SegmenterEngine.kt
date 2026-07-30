@@ -253,9 +253,11 @@ internal class SegmenterEngine(
 
   private companion object {
     const val TAG = "SegmenterEngine"
-    // NPU first: the int8 model bundle is what NPUs run best, and devices without a usable NPU
-    // fail fast at creation or first inference and fall through the chain.
-    val DELEGATE_PREFERENCE = listOf(Delegate.NPU, Delegate.GPU, Delegate.CPU)
+    // Ordering chosen from on-device measurements (Pixel 9 Pro, 512x288 frames): CPU (XNNPACK)
+    // ~800ms with good masks; NPU identical to CPU (NNAPI is deprecated and resolves to a CPU
+    // path on recent devices); GPU ~1700ms AND produced corrupt masks for this int8 bundle. CPU
+    // is therefore the deterministic default, GPU strictly a last resort.
+    val DELEGATE_PREFERENCE = listOf(Delegate.CPU, Delegate.NPU, Delegate.GPU)
     // The v2 task bundle required by the tasks-vision 1.0 InteractiveSegmenter (the legacy
     // magic_touch.tflite only works with InteractiveSegmenterLegacy). Downloaded at build time;
     // see downloadSegmenterModel in build.gradle.kts.
