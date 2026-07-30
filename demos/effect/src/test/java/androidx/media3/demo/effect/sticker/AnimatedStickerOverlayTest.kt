@@ -16,7 +16,6 @@
 package androidx.media3.demo.effect.sticker
 
 import android.graphics.Bitmap
-import androidx.media3.effect.StaticOverlaySettings
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,12 +29,15 @@ class AnimatedStickerOverlayTest {
     List(3) { Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888) } // distinct instances
 
   // Frames at 0ms, 100ms, 200ms; loop is 300ms.
-  private fun overlay(): AnimatedStickerOverlay =
+  private fun overlay(animation: StickerAnimation = StickerAnimation.NONE): AnimatedStickerOverlay =
     AnimatedStickerOverlay(
       frames,
       timestampsUs = longArrayOf(0, 100_000, 200_000),
       durationUs = 300_000,
-      settings = StaticOverlaySettings.Builder().build(),
+      animation = animation,
+      anchorX = 0.5f,
+      anchorY = -0.25f,
+      scale = 2f,
     )
 
   @Test
@@ -72,5 +74,52 @@ class AnimatedStickerOverlayTest {
     overlay.getBitmap(0)
 
     assertThat(overlay.getBitmap(16_000)).isSameInstanceAs(overlay.getBitmap(33_000))
+  }
+
+  @Test
+  fun getOverlaySettings_noAnimation_returnsBasePlacement() {
+    val overlay = overlay(StickerAnimation.NONE)
+
+    val settings = overlay.getOverlaySettings(0)
+
+    assertThat(settings.backgroundFrameAnchor.first).isEqualTo(0.5f)
+    assertThat(settings.backgroundFrameAnchor.second).isEqualTo(-0.25f)
+    assertThat(settings.scale.first).isEqualTo(2f)
+    assertThat(settings.rotationDegrees).isEqualTo(0f)
+    // Same instance every call: no per-frame settings allocation without a preset.
+    assertThat(overlay.getOverlaySettings(123_456)).isSameInstanceAs(settings)
+  }
+
+  @Test
+  fun getOverlaySettings_rock_alternatesRotationAroundBasePlacement() {
+    val overlay = overlay(StickerAnimation.ROCK)
+    overlay.getBitmap(1_000_000) // baseline at 1s
+
+    val firstHalf = overlay.getOverlaySettings(1_000_000)
+    val secondHalf = overlay.getOverlaySettings(1_000_000 + ROCK_HALF_PERIOD_US)
+
+    assertThat(firstHalf.rotationDegrees).isEqualTo(-ROCK_ANGLE_DEGREES)
+    assertThat(secondHalf.rotationDegrees).isEqualTo(ROCK_ANGLE_DEGREES)
+    // The base placement is preserved while rotating.
+    assertThat(firstHalf.backgroundFrameAnchor.first).isEqualTo(0.5f)
+    assertThat(firstHalf.scale.first).isEqualTo(2f)
+  }
+
+  @Test
+  fun forStaticBitmap_singleFrameWithPreset_animatesSettingsOnly() {
+    val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+    val overlay =
+      AnimatedStickerOverlay.forStaticBitmap(
+        bitmap,
+        StickerAnimation.PULSE,
+        anchorX = 0f,
+        anchorY = 0f,
+        scale = 1f,
+      )
+
+    assertThat(overlay.getBitmap(0)).isSameInstanceAs(bitmap)
+    assertThat(overlay.getBitmap(5_000_000)).isSameInstanceAs(bitmap)
+    val quarterPeriod = overlay.getOverlaySettings(PULSE_PERIOD_US / 4)
+    assertThat(quarterPeriod.scale.first).isWithin(1e-4f).of(1f + PULSE_AMPLITUDE)
   }
 }

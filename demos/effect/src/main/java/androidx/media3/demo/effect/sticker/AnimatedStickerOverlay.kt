@@ -25,38 +25,83 @@ import androidx.media3.effect.StaticOverlaySettings
 import com.google.common.collect.ImmutableList
 
 /**
- * A [BitmapOverlay] that plays a recorded animated sticker in a loop.
+ * A [BitmapOverlay] that animates a placed sticker in either or both of two ways: swapping
+ * recorded bitmap frames over time (looping via [FrameTimeline]) and modulating the overlay
+ * settings with a [StickerAnimation] preset (rotation/scale/anchor per presentation time, at zero
+ * texture-upload cost).
  *
- * The first [getBitmap] call baselines the video's presentation time, so the loop starts at the
- * sticker's first frame wherever playback begins; [FrameTimeline] handles wraparound including
+ * The first call baselines the video's presentation time, so animations start at their beginning
+ * wherever playback begins; [FrameTimeline] and [modulationAt] both handle wraparound including
  * seeks behind the baseline. BitmapOverlay re-uploads its texture only when the returned instance
- * changes, so returning the same frame between animation steps costs one reference compare, and a
- * frame advance costs one texture upload at the sticker's (≤512px) size.
+ * changes, so a single-frame sticker with a settings preset never re-uploads at all.
  *
- * All frames must share the same dimensions (guaranteed by [StickerFrameRecorder]'s constant-size
- * composition) so overlay anchoring stays stable. Instances are used on media3's GL thread; the
- * mutable baseline is confined to that thread.
+ * Instances are used on media3's GL thread; the mutable baseline is confined to that thread.
  */
 @OptIn(UnstableApi::class)
 internal class AnimatedStickerOverlay(
   frames: List<Bitmap>,
   timestampsUs: LongArray,
   durationUs: Long,
-  private val settings: StaticOverlaySettings,
+  private val animation: StickerAnimation,
+  private val anchorX: Float,
+  private val anchorY: Float,
+  private val scale: Float,
 ) : BitmapOverlay() {
 
   private val frames: ImmutableList<Bitmap> = ImmutableList.copyOf(frames)
   private val timeline = FrameTimeline(timestampsUs, durationUs)
+  private val staticSettings = settingsFor(AnimationModulation.IDENTITY)
 
-  // Confined to the GL thread that calls getBitmap.
+  // Confined to the GL thread that calls getBitmap/getOverlaySettings.
   private var firstPresentationTimeUs = C.TIME_UNSET
 
-  override fun getBitmap(presentationTimeUs: Long): Bitmap {
+  override fun getBitmap(presentationTimeUs: Long): Bitmap =
+    frames[timeline.frameIndexAt(elapsedUs(presentationTimeUs))]
+
+  override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
+    if (animation == StickerAnimation.NONE) {
+      return staticSettings
+    }
+    return settingsFor(animation.modulationAt(elapsedUs(presentationTimeUs)))
+  }
+
+  private fun elapsedUs(presentationTimeUs: Long): Long {
     if (firstPresentationTimeUs == C.TIME_UNSET) {
       firstPresentationTimeUs = presentationTimeUs
     }
-    return frames[timeline.frameIndexAt(presentationTimeUs - firstPresentationTimeUs)]
+    return presentationTimeUs - firstPresentationTimeUs
   }
 
-  override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings = settings
+  private fun settingsFor(modulation: AnimationModulation): StaticOverlaySettings =
+    StaticOverlaySettings.Builder()
+      .setBackgroundFrameAnchor(
+        (anchorX + modulation.anchorOffsetX).coerceIn(-1f, 1f),
+        (anchorY + modulation.anchorOffsetY).coerceIn(-1f, 1f),
+      )
+      .setScale(scale * modulation.scaleFactor, scale * modulation.scaleFactor)
+      .setRotationDegrees(modulation.rotationDegrees)
+      .build()
+
+  companion object {
+    /** Loop length used when a static bitmap is animated only by a settings preset. */
+    private const val SINGLE_FRAME_DURATION_US = 1_000_000L
+
+    /** Wraps a static sticker bitmap so a [StickerAnimation] preset can animate its placement. */
+    fun forStaticBitmap(
+      bitmap: Bitmap,
+      animation: StickerAnimation,
+      anchorX: Float,
+      anchorY: Float,
+      scale: Float,
+    ): AnimatedStickerOverlay =
+      AnimatedStickerOverlay(
+        listOf(bitmap),
+        longArrayOf(0),
+        SINGLE_FRAME_DURATION_US,
+        animation,
+        anchorX,
+        anchorY,
+        scale,
+      )
+  }
 }
