@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -89,6 +90,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.demo.effect.sticker.CreateStickerContract
 import androidx.media3.demo.effect.sticker.StickerAnimation
+import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.ui.ColorsDropDownMenu
 import androidx.media3.demo.effect.ui.GenericExposedDropdownMenu
 import androidx.media3.demo.effect.ui.InputSelector
@@ -358,7 +360,7 @@ class EffectActivity : ComponentActivity() {
           val createSticker =
             rememberLauncherForActivityResult(CreateStickerContract()) { stickerId ->
               if (stickerId != null) {
-                viewModel.refreshStickers(stickerId)
+                viewModel.onStickerCreated(stickerId)
               }
             }
           Column {
@@ -377,15 +379,24 @@ class EffectActivity : ComponentActivity() {
                 itemLabelProvider = { it.name },
               )
             }
+            val selectedAssetIsAnimated = selectedAsset is StickerAsset.Animated
             GenericExposedDropdownMenu(
               label = stringResource(R.string.sticker_animation),
               selectedValue = uiState.selectedStickerAnimation,
               options = StickerAnimation.entries,
               onOptionSelected = { viewModel.updateSelectedStickerAnimation(it) },
-              modifier =
-                Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
+              modifier = Modifier.fillMaxWidth(),
+              enabled = !selectedAssetIsAnimated,
               itemLabelProvider = { stringResource(it.labelRes()) },
             )
+            if (selectedAssetIsAnimated) {
+              Text(
+                text = stringResource(R.string.sticker_animation_recorded_note),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
+              )
+            }
+            Spacer(Modifier.height(dimensionResource(R.dimen.large_padding)))
             Row(
               horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))
             ) {

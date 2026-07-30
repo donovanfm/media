@@ -78,13 +78,14 @@ internal fun <T> GenericExposedDropdownMenu(
   options: List<T>,
   onOptionSelected: (T) -> Unit,
   modifier: Modifier = Modifier,
+  enabled: Boolean = true,
   itemLabelProvider: @Composable (T) -> String = { it.toString() },
   leadingIconProvider: @Composable ((T) -> Unit)? = null,
 ) {
   var expanded by remember { mutableStateOf(false) }
   ExposedDropdownMenuBox(
-    expanded = expanded,
-    onExpandedChange = { expanded = it },
+    expanded = expanded && enabled,
+    onExpandedChange = { expanded = it && enabled },
     modifier = modifier,
   ) {
     OutlinedTextField(
@@ -94,8 +95,9 @@ internal fun <T> GenericExposedDropdownMenu(
       onValueChange = {},
       readOnly = true,
       singleLine = true,
+      enabled = enabled,
       label = { Text(label) },
-      trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+      trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
       colors = ExposedDropdownMenuDefaults.textFieldColors(),
     )
     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

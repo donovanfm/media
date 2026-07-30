@@ -149,9 +149,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   /**
    * Loads the sticker picker contents — bundled assets plus user-created stickers — and decodes
    * their bitmaps off the main thread. When [selectId] is given (a freshly created sticker), it
-   * becomes the selected entry.
+   * becomes the selected entry; [placeAfterLoad] additionally enters placement mode for it.
    */
-  private fun loadStickerAssets(selectId: String? = null) {
+  private fun loadStickerAssets(selectId: String? = null, placeAfterLoad: Boolean = false) {
     viewModelScope.launch {
       try {
         val (assets, bitmaps) =
@@ -195,6 +195,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             stickerAssetsLoaded = assets.isNotEmpty(),
           )
         }
+        if (placeAfterLoad && _uiState.value.selectedStickerAssetId == selectId) {
+          startStickerPlacement()
+        }
       } catch (e: IOException) {
         _uiState.update {
           it.copy(
@@ -205,9 +208,13 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     }
   }
 
-  /** Reloads the sticker list after a sticker was created, selecting the new one. */
-  fun refreshStickers(selectId: String?) {
-    loadStickerAssets(selectId)
+  /**
+   * Reloads the sticker list after a sticker was created, then drops the new sticker straight
+   * into placement mode — creating a sticker almost always means wanting it on the video, so the
+   * flow skips the manual Place step.
+   */
+  fun onStickerCreated(stickerId: String) {
+    loadStickerAssets(selectId = stickerId, placeAfterLoad = true)
   }
 
   /** The URI of the currently playing media item, used as the sticker creation source video. */
@@ -420,7 +427,14 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
               contentRect = contentRect,
               videoPixelWidth = videoSize.width,
               animated = animated,
-              animation = _uiState.value.selectedStickerAnimation,
+              // Recorded stickers bring their own animation; the preset dropdown is disabled for
+              // them in the UI, and NONE here keeps behavior consistent with that promise.
+              animation =
+                if (animated != null) {
+                  StickerAnimation.NONE
+                } else {
+                  _uiState.value.selectedStickerAnimation
+                },
             )
         )
       }
