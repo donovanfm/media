@@ -464,8 +464,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Commits the sticker being placed, enables the sticker overlay effect, and resumes playback.
-   * The sticker renders once effects are applied.
+   * Commits the sticker being placed, enables the sticker overlay effect, applies the effects
+   * immediately, and resumes playback. Unlike the other effects (which wait for the Apply effects
+   * button), a placed sticker takes effect right away — the user just positioned it visually, so
+   * an interim placed-but-not-applied state would only add a step.
    */
   fun commitStickerPlacement() {
     val placing = _uiState.value.stickerPlacement as? StickerPlacement.Placing ?: return
@@ -486,9 +488,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             .build(),
         stickerPlacement = StickerPlacement.Inactive,
         stickerOverlayChecked = true,
-        effectsChanged = true,
       )
     }
+    applyEffects()
     exoPlayer.play()
   }
 
@@ -511,7 +513,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Removes a committed sticker. The change takes effect the next time effects are applied.
+   * Removes a committed sticker and re-applies the effects immediately, matching the
+   * apply-on-commit behavior of placement so sticker edits are always WYSIWYG.
    *
    * @param id The [PlacedSticker.id] of the sticker to remove.
    */
@@ -519,10 +522,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     _uiState.update {
       it.copy(
         placedStickers =
-          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id }),
-        effectsChanged = true,
+          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id })
       )
     }
+    applyEffects()
   }
 
   /**

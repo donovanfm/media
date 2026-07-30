@@ -263,8 +263,10 @@ class EffectActivity : ComponentActivity() {
   private fun EffectControls(viewModel: EffectViewModel, uiState: EffectUiState) {
     if (uiState.stickerPlacement is StickerPlacement.Placing) {
       Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))) {
+        // Committing a placement applies immediately — the sticker was just positioned visually,
+        // so this button doubles as Apply effects rather than leaving an interim placed state.
         Button(onClick = { viewModel.commitStickerPlacement() }) {
-          Text(text = stringResource(id = R.string.done))
+          Text(text = stringResource(id = R.string.apply_effects))
         }
         OutlinedButton(onClick = { viewModel.cancelStickerPlacement() }) {
           Text(text = stringResource(id = R.string.cancel))
