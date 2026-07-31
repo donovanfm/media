@@ -355,13 +355,25 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Updates the preset placement animation applied to the next placed sticker. Like asset
-   * selection, this doesn't change already-applied effects by itself.
+   * Updates the preset placement animation. When a sticker is currently being placed, the change
+   * applies to it live (so choosing a preset after auto-placement works as expected); recorded
+   * stickers keep [StickerAnimation.NONE] since they play their own animation.
    *
    * @param animation The preset to use.
    */
   fun updateSelectedStickerAnimation(animation: StickerAnimation) {
-    _uiState.update { it.copy(selectedStickerAnimation = animation) }
+    _uiState.update {
+      val placement = it.stickerPlacement
+      it.copy(
+        selectedStickerAnimation = animation,
+        stickerPlacement =
+          if (placement is StickerPlacement.Placing && placement.animated == null) {
+            placement.copy(animation = animation)
+          } else {
+            placement
+          },
+      )
+    }
   }
 
   /**
@@ -469,8 +481,16 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
             animated = sticker.animated,
             animation = sticker.animation,
           ),
+        // Reflect the edited sticker's preset in the Animation dropdown.
+        selectedStickerAnimation = sticker.animation,
       )
     }
+    // Re-apply without the sticker being edited: otherwise its previously applied copy stays
+    // baked into the video next to the draggable preview, which reads as a duplicate. The player
+    // is paused during placement, so no frame would flow through the rebuilt pipeline on its
+    // own; seeking to the current position re-renders the paused frame without the old sticker.
+    applyEffects()
+    exoPlayer.seekTo(exoPlayer.currentPosition)
   }
 
   /**
@@ -544,6 +564,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
           } ?: it.placedStickers,
         stickerPlacement = StickerPlacement.Inactive,
       )
+    }
+    if (placing.original != null) {
+      // Editing un-applied the original when placement began; bring it back on screen.
+      applyEffects()
     }
     exoPlayer.play()
   }
