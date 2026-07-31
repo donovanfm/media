@@ -88,6 +88,11 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   // EffectUiState while the heavyweight bitmaps stay here (same idiom as lottieOverlayOptions).
   private var stickerBitmaps: Map<String, Bitmap> = emptyMap()
 
+  // The last state explicitly applied to the player. Immediate sticker changes rebuild the
+  // non-sticker effects from this snapshot so they never silently confirm changes that are still
+  // pending behind the Apply effects button.
+  private var lastAppliedState: EffectUiState = EffectUiState()
+
   init {
     loadPlaylists()
     loadLottieEffects()
@@ -232,7 +237,17 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
       setVideoEffects(emptyList())
       prepare()
     }
-    _uiState.update { it.copy(effectsEnabled = true, effectsChanged = false) }
+    lastAppliedState = EffectUiState()
+    // Placed stickers snapshot the previous video's content rect and pixel size, so they can't be
+    // carried to different media meaningfully; clear them (and any placement in progress).
+    _uiState.update {
+      it.copy(
+        effectsEnabled = true,
+        effectsChanged = false,
+        placedStickers = ImmutableList.of(),
+        stickerPlacement = StickerPlacement.Inactive,
+      )
+    }
   }
 
   /**
@@ -486,11 +501,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
       )
     }
     // Re-apply without the sticker being edited: otherwise its previously applied copy stays
-    // baked into the video next to the draggable preview, which reads as a duplicate. The player
-    // is paused during placement, so no frame would flow through the rebuilt pipeline on its
-    // own; seeking to the current position re-renders the paused frame without the old sticker.
-    applyEffects()
-    exoPlayer.seekTo(exoPlayer.currentPosition)
+    // baked into the video next to the draggable preview, which reads as a duplicate.
+    applyStickerChange()
   }
 
   /**
@@ -546,7 +558,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         stickerOverlayChecked = true,
       )
     }
-    applyEffects()
+    applyStickerChange()
     exoPlayer.play()
   }
 
@@ -567,7 +579,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     }
     if (placing.original != null) {
       // Editing un-applied the original when placement began; bring it back on screen.
-      applyEffects()
+      applyStickerChange()
     }
     exoPlayer.play()
   }
@@ -579,21 +591,54 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param id The [PlacedSticker.id] of the sticker to remove.
    */
   fun removePlacedSticker(id: UUID) {
+    if (_uiState.value.stickerPlacement is StickerPlacement.Placing) {
+      // Deleting mid-placement would fight the placement state; the row is disabled in the UI
+      // too, this is belt-and-braces.
+      return
+    }
     _uiState.update {
       it.copy(
         placedStickers =
           ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id })
       )
     }
-    applyEffects()
+    applyStickerChange()
   }
 
   /**
-   * Builds the video effects list based on the current [EffectUiState] and applies them to the
-   * underlying [ExoPlayer].
+   * Applies the full current [EffectUiState] to the player. Called by the Apply effects button —
+   * this is the only path that confirms pending (deferred) changes to the non-sticker effects.
    */
   fun applyEffects() {
+    applyState(_uiState.value)
+    _uiState.update { it.copy(effectsChanged = false) }
+  }
+
+  /**
+   * Applies an immediate sticker change (place/edit/delete/cancel) WITHOUT confirming pending
+   * changes to the other effects: the non-sticker effects are rebuilt from the last explicitly
+   * applied state, with only the sticker fields taken from the current state. Pending changes
+   * (and the Apply button) are left untouched.
+   */
+  private fun applyStickerChange() {
     val currentState = _uiState.value
+    applyState(
+      lastAppliedState.copy(
+        stickerOverlayChecked = currentState.stickerOverlayChecked,
+        placedStickers = currentState.placedStickers,
+      )
+    )
+  }
+
+  /**
+   * Builds the video effects list from [state] and applies it to the underlying [ExoPlayer].
+   * When playback is paused (or ended), no frame would flow through the rebuilt pipeline on its
+   * own, so this seeks to the current position to re-render the visible frame with the new
+   * effects.
+   */
+  private fun applyState(state: EffectUiState) {
+    lastAppliedState = state
+    val currentState = state
     val listBuilder = ImmutableList.builder<Effect>()
 
     if (currentState.contrastChecked && currentState.contrastValue != 0f) {
@@ -682,8 +727,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     exoPlayer.apply {
       setVideoEffects(listBuilder.build())
       prepare()
+      if (!isPlaying) {
+        seekTo(currentPosition)
+      }
     }
-    _uiState.update { it.copy(effectsChanged = false) }
   }
 
   /** Clears any active error message in the [EffectUiState]. */
