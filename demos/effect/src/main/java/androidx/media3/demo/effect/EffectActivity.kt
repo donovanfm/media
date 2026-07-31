@@ -67,15 +67,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,9 +92,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
+import androidx.media3.demo.effect.sticker.AnimationModulation
 import androidx.media3.demo.effect.sticker.CreateStickerContract
 import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.sticker.StickerAsset
+import androidx.media3.demo.effect.sticker.modulationAt
 import androidx.media3.demo.effect.ui.ColorsDropDownMenu
 import androidx.media3.demo.effect.ui.GenericExposedDropdownMenu
 import androidx.media3.demo.effect.ui.InputSelector
@@ -213,6 +219,7 @@ class EffectActivity : ComponentActivity() {
             bitmap = stickerPlacement.bitmap,
             transform = stickerPlacement.transform,
             contentRect = stickerPlacement.contentRect,
+            animation = stickerPlacement.animation,
             onTransform = onStickerTransform,
             modifier = Modifier.align(Alignment.TopStart),
           )
@@ -226,17 +233,31 @@ class EffectActivity : ComponentActivity() {
   /**
    * The draggable, pinch-scalable sticker preview drawn over the video during placement. The
    * gesture area is sized and positioned to [contentRect] (the letterboxed video area) so the
-   * sticker can't be placed on the black bars.
+   * sticker can't be placed on the black bars. A dashed border marks the preview as editable, and
+   * the selected [animation] preset plays live on it so the Animation dropdown gives immediate
+   * feedback even though the video is paused.
    */
   @Composable
   private fun DraggableSticker(
     bitmap: Bitmap,
     transform: StickerTransform,
     contentRect: Rect,
+    animation: StickerAnimation,
     onTransform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
     modifier: Modifier = Modifier,
   ) {
     val density = LocalDensity.current
+    var modulation by remember { mutableStateOf(AnimationModulation.IDENTITY) }
+    LaunchedEffect(animation) {
+      if (animation == StickerAnimation.NONE) {
+        modulation = AnimationModulation.IDENTITY
+        return@LaunchedEffect
+      }
+      val startNanos = withFrameNanos { it }
+      while (true) {
+        withFrameNanos { now -> modulation = animation.modulationAt((now - startNanos) / 1000) }
+      }
+    }
     Box(
       modifier
         .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
@@ -256,7 +277,24 @@ class EffectActivity : ComponentActivity() {
           Modifier.offset {
               IntOffset(transform.offset.x.roundToInt(), transform.offset.y.roundToInt())
             }
-            .graphicsLayer(scaleX = transform.scale, scaleY = transform.scale)
+            .graphicsLayer(
+              scaleX = transform.scale * modulation.scaleFactor,
+              scaleY = transform.scale * modulation.scaleFactor,
+              rotationZ = modulation.rotationDegrees,
+              // Anchor offsets span [-1, 1] across the content rect, +y up (overlay space).
+              translationX = modulation.anchorOffsetX * contentRect.width / 2f,
+              translationY = -modulation.anchorOffsetY * contentRect.height / 2f,
+            )
+            .drawBehind {
+              drawRect(
+                color = Color.White.copy(alpha = 0.9f),
+                style =
+                  Stroke(
+                    width = 2.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 12f)),
+                  ),
+              )
+            }
             .wrapContentSize(align = Alignment.TopStart, unbounded = true),
       )
     }
@@ -264,12 +302,37 @@ class EffectActivity : ComponentActivity() {
 
   @Composable
   private fun EffectControls(viewModel: EffectViewModel, uiState: EffectUiState) {
-    if (uiState.stickerPlacement is StickerPlacement.Placing) {
-      Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))) {
-        // Committing a placement applies immediately — the sticker was just positioned visually,
-        // so this button doubles as Apply effects rather than leaving an interim placed state.
+    val placement = uiState.stickerPlacement
+    if (placement is StickerPlacement.Placing) {
+      // Placement is a distinct mode: a banner + compact toolbar replace the Apply button, and
+      // the effects list behind is scrimmed. Committing applies the sticker immediately without
+      // confirming other effects' pending changes (see EffectViewModel.applyStickerChange).
+      Text(
+        text = stringResource(R.string.sticker_placement_banner, placement.assetName),
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(horizontal = dimensionResource(R.dimen.large_padding)),
+      )
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding)),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.fillMaxWidth()
+            .padding(
+              horizontal = dimensionResource(R.dimen.large_padding),
+              vertical = dimensionResource(R.dimen.small_padding),
+            ),
+      ) {
+        GenericExposedDropdownMenu(
+          label = stringResource(R.string.sticker_animation),
+          selectedValue = uiState.selectedStickerAnimation,
+          options = StickerAnimation.entries,
+          onOptionSelected = { viewModel.updateSelectedStickerAnimation(it) },
+          modifier = Modifier.weight(1f),
+          enabled = placement.animated == null,
+          itemLabelProvider = { stringResource(it.labelRes()) },
+        )
         Button(onClick = { viewModel.commitStickerPlacement() }) {
-          Text(text = stringResource(id = R.string.apply_effects))
+          Text(text = stringResource(id = R.string.done))
         }
         OutlinedButton(onClick = { viewModel.cancelStickerPlacement() }) {
           Text(text = stringResource(id = R.string.cancel))
@@ -289,6 +352,28 @@ class EffectActivity : ComponentActivity() {
 
   @Composable
   private fun EffectControlsList(viewModel: EffectViewModel, uiState: EffectUiState) {
+    Box {
+      EffectItems(viewModel, uiState)
+      if (uiState.stickerPlacement is StickerPlacement.Placing) {
+        // Scrim the list during placement: the mode boundary is visible and the controls behind
+        // it can't be interacted with until Done or Cancel.
+        Box(
+          Modifier.matchParentSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f))
+            .pointerInput(Unit) {
+              awaitPointerEventScope {
+                while (true) {
+                  awaitPointerEvent().changes.forEach { it.consume() }
+                }
+              }
+            }
+        )
+      }
+    }
+  }
+
+  @Composable
+  private fun EffectItems(viewModel: EffectViewModel, uiState: EffectUiState) {
     LazyColumn(Modifier.padding(vertical = dimensionResource(id = R.dimen.small_padding))) {
       item {
         EffectItem(
@@ -406,7 +491,10 @@ class EffectActivity : ComponentActivity() {
               ) {
                 Text(text = stringResource(R.string.place_sticker))
               }
-              OutlinedButton(onClick = { createSticker.launch(viewModel.currentMediaUri()) }) {
+              OutlinedButton(
+                enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+                onClick = { createSticker.launch(viewModel.currentMediaUri()) },
+              ) {
                 Text(text = stringResource(R.string.create_custom_sticker))
               }
             }
@@ -429,7 +517,10 @@ class EffectActivity : ComponentActivity() {
                   ) {
                     Text(text = stringResource(R.string.edit))
                   }
-                  IconButton(onClick = { viewModel.removePlacedSticker(sticker.id) }) {
+                  IconButton(
+                    enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+                    onClick = { viewModel.removePlacedSticker(sticker.id) },
+                  ) {
                     Icon(
                       imageVector = Icons.TwoTone.Delete,
                       contentDescription = stringResource(R.string.delete_sticker),

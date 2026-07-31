@@ -62,7 +62,9 @@
   <string name="placed_stickers">Placed stickers</string>
   <string name="edit">Edit</string>
   <string name="delete_sticker">Delete sticker</string>
+  <string name="done">Done</string>
   <string name="cancel">Cancel</string>
+  <string name="sticker_placement_banner">Placing %1$s — drag to move, pinch to resize</string>
   <string name="sticker_preview">Sticker preview</string>
   <string name="sticker_loading_error">Could not load sticker images.</string>
   <string name="create_custom_sticker">Create custom sticker</string>
