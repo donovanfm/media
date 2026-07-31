@@ -37,6 +37,7 @@ import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
+import androidx.media3.demo.effect.sticker.SegmenterEngine
 import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.sticker.StickerRepository
@@ -97,6 +98,26 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     loadPlaylists()
     loadLottieEffects()
     loadStickerAssets()
+    checkStickerCreationAvailable()
+  }
+
+  /**
+   * Custom sticker creation needs the segmentation model, which builds made offline (or with
+   * -PskipStickerModelDownload) don't bundle; disable the entry point instead of failing later.
+   */
+  private fun checkStickerCreationAvailable() {
+    viewModelScope.launch {
+      val available =
+        withContext(Dispatchers.IO) {
+          try {
+            getApplication<Application>().assets.open(SegmenterEngine.MODEL_ASSET_PATH).use {}
+            true
+          } catch (e: IOException) {
+            false
+          }
+        }
+      _uiState.update { it.copy(stickerCreationAvailable = available) }
+    }
   }
 
   private fun loadPlaylists() {

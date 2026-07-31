@@ -47,6 +47,8 @@ internal data class EffectUiState(
   val stickerAssets: ImmutableList<StickerAsset> = ImmutableList.of(),
   val selectedStickerAssetId: String? = null,
   val selectedStickerAnimation: StickerAnimation = StickerAnimation.NONE,
+  /** False when the segmentation model isn't bundled (offline/skipped build). */
+  val stickerCreationAvailable: Boolean = true,
   val placedStickers: ImmutableList<PlacedSticker> = ImmutableList.of(),
   val stickerPlacement: StickerPlacement = StickerPlacement.Inactive,
   val playerBoxSize: Size = Size.Zero,

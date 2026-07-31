@@ -492,11 +492,20 @@ class EffectActivity : ComponentActivity() {
                 Text(text = stringResource(R.string.place_sticker))
               }
               OutlinedButton(
-                enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
+                enabled =
+                  uiState.stickerPlacement is StickerPlacement.Inactive &&
+                    uiState.stickerCreationAvailable,
                 onClick = { createSticker.launch(viewModel.currentMediaUri()) },
               ) {
                 Text(text = stringResource(R.string.create_custom_sticker))
               }
+            }
+            if (!uiState.stickerCreationAvailable) {
+              Text(
+                text = stringResource(R.string.sticker_creation_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
+              )
             }
             if (uiState.placedStickers.isNotEmpty()) {
               Text(

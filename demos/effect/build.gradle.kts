@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import java.security.MessageDigest
+
 plugins {
   id("media3.android-application")
   alias(libs.plugins.kotlin.compose.compiler)
@@ -55,8 +57,13 @@ android {
 
 /**
  * Downloads the MediaPipe interactive segmentation model into the build directory, where it is
- * picked up as an asset. Cached across builds; if you need to build offline, download the file
- * manually from the URL below and place it at the output path.
+ * picked up as an asset. The file is verified against a pinned SHA-256 (every build packages the
+ * exact bytes the demo was tested with — including cached or hand-placed files, so a truncated or
+ * stale model can't hide in the cache) and written via a temp file + atomic rename, so an
+ * interrupted build never leaves a broken model behind.
+ *
+ * The download is skipped when Gradle runs with --offline or -PskipStickerModelDownload; the
+ * build still succeeds and the app disables custom sticker creation when the asset is absent.
  */
 val downloadSegmenterModel by
   tasks.registering {
@@ -64,20 +71,67 @@ val downloadSegmenterModel by
     // magic_touch.tflite only works with InteractiveSegmenterLegacy.
     val modelUrl =
       "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task"
+    val modelSha256 = "38431bc66b883404e8397f74c3579404315b9b52b04a46c6346fe906a7309b03"
     val outputFile = layout.buildDirectory.file("downloadedAssets/interactive_segmentation.task")
-    outputs.file(outputFile)
-    onlyIf { !outputFile.get().asFile.exists() }
+    val skipRequested =
+      gradle.startParameter.isOffline ||
+        providers.gradleProperty("skipStickerModelDownload").isPresent
+    // Deliberately NOT registered as a task output: the model is a checksum-verified cache the
+    // task manages itself. Registering it would let Gradle's stale-output cleanup delete it
+    // whenever the task implementation changes, forcing a pointless 30MB re-download.
     doLast {
+      fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+          val buffer = ByteArray(64 * 1024)
+          while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+          }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+      }
+
       val target = outputFile.get().asFile
+      if (target.exists()) {
+        if (sha256(target) == modelSha256) {
+          return@doLast
+        }
+        logger.warn("Cached segmentation model failed SHA-256 verification; re-downloading.")
+        target.delete()
+      }
+      if (skipRequested) {
+        logger.warn(
+          "Skipping segmentation model download (offline build or -PskipStickerModelDownload); " +
+            "custom sticker creation will be disabled in this build."
+        )
+        return@doLast
+      }
       target.parentFile.mkdirs()
+      val tempFile = File(target.parentFile, target.name + ".part")
       try {
         uri(modelUrl).toURL().openStream().use { input ->
-          target.outputStream().use { output -> input.copyTo(output) }
+          tempFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        val actualSha256 = sha256(tempFile)
+        if (actualSha256 != modelSha256) {
+          throw GradleException(
+            "Downloaded segmentation model failed SHA-256 verification: expected $modelSha256, " +
+              "got $actualSha256."
+          )
+        }
+        if (!tempFile.renameTo(target)) {
+          throw GradleException("Could not move ${tempFile.path} to ${target.path}.")
         }
       } catch (e: Exception) {
-        target.delete()
+        tempFile.delete()
+        if (e is GradleException) {
+          throw e
+        }
         throw GradleException(
-          "Failed to download the MediaPipe segmentation model. If building offline, download " +
+          "Failed to download the MediaPipe segmentation model. If building offline, use " +
+            "-PskipStickerModelDownload (custom sticker creation will be disabled) or download " +
             "$modelUrl manually and place it at ${target.path}.",
           e,
         )

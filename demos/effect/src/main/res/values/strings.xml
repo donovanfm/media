@@ -89,4 +89,5 @@
   <string name="sticker_error_save">Could not save the sticker.</string>
   <string name="sticker_error_playback">Video playback failed.</string>
   <string name="sticker_error_source_load">Could not load the selected media.</string>
+  <string name="sticker_creation_unavailable">Custom sticker creation is unavailable: this build doesn\'t include the segmentation model.</string>
 </resources>

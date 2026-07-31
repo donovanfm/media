@@ -251,16 +251,18 @@ internal class SegmenterEngine(
     return ConfidenceMask(floats, mask.width, mask.height)
   }
 
-  private companion object {
-    const val TAG = "SegmenterEngine"
+  companion object {
+    private const val TAG = "SegmenterEngine"
     // Ordering chosen from on-device measurements (Pixel 9 Pro, 512x288 frames): CPU (XNNPACK)
     // ~800ms with good masks; NPU identical to CPU (NNAPI is deprecated and resolves to a CPU
     // path on recent devices); GPU ~1700ms AND produced corrupt masks for this int8 bundle. CPU
     // is therefore the deterministic default, GPU strictly a last resort.
-    val DELEGATE_PREFERENCE = listOf(Delegate.CPU, Delegate.NPU, Delegate.GPU)
+    private val DELEGATE_PREFERENCE = listOf(Delegate.CPU, Delegate.NPU, Delegate.GPU)
     // The v2 task bundle required by the tasks-vision 1.0 InteractiveSegmenter (the legacy
     // magic_touch.tflite only works with InteractiveSegmenterLegacy). Downloaded at build time;
     // see downloadSegmenterModel in build.gradle.kts.
-    const val MODEL_ASSET_PATH = "interactive_segmentation.task"
+    // Internal so the effect screen can check the asset's presence: builds made offline (or with
+    // -PskipStickerModelDownload) don't bundle the model, and creation is disabled gracefully.
+    internal const val MODEL_ASSET_PATH = "interactive_segmentation.task"
   }
 }
