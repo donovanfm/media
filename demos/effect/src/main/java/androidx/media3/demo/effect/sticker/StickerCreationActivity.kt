@@ -78,6 +78,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.createBitmap
@@ -143,7 +145,8 @@ class StickerCreationActivity : ComponentActivity() {
         Text(
           text = stringResource(R.string.sticker_creation_title),
           style = MaterialTheme.typography.titleLarge,
-          modifier = Modifier.padding(dimensionResource(R.dimen.large_padding)),
+          modifier =
+            Modifier.padding(dimensionResource(R.dimen.large_padding)).semantics { heading() },
         )
         Row(
           horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding)),
@@ -327,7 +330,11 @@ class StickerCreationActivity : ComponentActivity() {
       is CreationPhase.Recording ->
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.padding(dimensionResource(R.dimen.regular_padding)),
+          modifier =
+            Modifier.padding(dimensionResource(R.dimen.regular_padding))
+              // Scrimmed so the status stays legible over arbitrary video content.
+              .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+              .padding(dimensionResource(R.dimen.regular_padding)),
         ) {
           Box(Modifier.size(12.dp).clip(CircleShape).background(Color.Red))
           Text(

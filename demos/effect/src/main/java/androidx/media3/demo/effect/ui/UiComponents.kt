@@ -79,6 +79,7 @@ internal fun <T> GenericExposedDropdownMenu(
   onOptionSelected: (T) -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
+  supportingText: String? = null,
   itemLabelProvider: @Composable (T) -> String = { it.toString() },
   leadingIconProvider: @Composable ((T) -> Unit)? = null,
 ) {
@@ -97,6 +98,9 @@ internal fun <T> GenericExposedDropdownMenu(
       singleLine = true,
       enabled = enabled,
       label = { Text(label) },
+      // A supporting text (e.g. why the field is disabled) stays associated with the field for
+      // accessibility services, unlike a separate Text below it.
+      supportingText = supportingText?.let { { Text(it) } },
       trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && enabled) },
       colors = ExposedDropdownMenuDefaults.textFieldColors(),
     )

@@ -87,6 +87,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -258,6 +263,47 @@ class EffectActivity : ComponentActivity() {
         withFrameNanos { now -> modulation = animation.modulationAt((now - startNanos) / 1000) }
       }
     }
+    // Drag and pinch have no meaning to accessibility services, so the preview exposes custom
+    // actions that nudge and scale through the same transform path the gestures use, plus a
+    // spoken position/scale state. This is the standard recipe for making bespoke gestures
+    // accessible.
+    val nudgePx = contentRect.width * NUDGE_FRACTION
+    val stickerCenter =
+      Offset(transform.offset.x + bitmap.width / 2f, transform.offset.y + bitmap.height / 2f)
+    val positionDescription =
+      stringResource(
+        R.string.sticker_position_description,
+        (stickerCenter.x / contentRect.width * 100).roundToInt().coerceIn(0, 100),
+        (stickerCenter.y / contentRect.height * 100).roundToInt().coerceIn(0, 100),
+        "%.1f".format(Locale.ROOT, transform.scale),
+      )
+    val accessibilityActions =
+      listOf(
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_move_left)) {
+          onTransform(stickerCenter, Offset(-nudgePx, 0f), 1f)
+          true
+        },
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_move_right)) {
+          onTransform(stickerCenter, Offset(nudgePx, 0f), 1f)
+          true
+        },
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_move_up)) {
+          onTransform(stickerCenter, Offset(0f, -nudgePx), 1f)
+          true
+        },
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_move_down)) {
+          onTransform(stickerCenter, Offset(0f, nudgePx), 1f)
+          true
+        },
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_grow)) {
+          onTransform(stickerCenter, Offset.Zero, NUDGE_ZOOM_FACTOR)
+          true
+        },
+        CustomAccessibilityAction(stringResource(R.string.sticker_action_shrink)) {
+          onTransform(stickerCenter, Offset.Zero, 1f / NUDGE_ZOOM_FACTOR)
+          true
+        },
+      )
     Box(
       modifier
         .offset { IntOffset(contentRect.left.roundToInt(), contentRect.top.roundToInt()) }
@@ -274,7 +320,11 @@ class EffectActivity : ComponentActivity() {
         bitmap = bitmap.asImageBitmap(),
         contentDescription = stringResource(R.string.sticker_preview),
         modifier =
-          Modifier.offset {
+          Modifier.semantics {
+              stateDescription = positionDescription
+              customActions = accessibilityActions
+            }
+            .offset {
               IntOffset(transform.offset.x.roundToInt(), transform.offset.y.roundToInt())
             }
             .graphicsLayer(
@@ -329,6 +379,12 @@ class EffectActivity : ComponentActivity() {
           onOptionSelected = { viewModel.updateSelectedStickerAnimation(it) },
           modifier = Modifier.weight(1f),
           enabled = placement.animated == null,
+          supportingText =
+            if (placement.animated != null) {
+              stringResource(R.string.sticker_animation_recorded_note)
+            } else {
+              null
+            },
           itemLabelProvider = { stringResource(it.labelRes()) },
         )
         Button(onClick = { viewModel.commitStickerPlacement() }) {
@@ -472,15 +528,14 @@ class EffectActivity : ComponentActivity() {
               onOptionSelected = { viewModel.updateSelectedStickerAnimation(it) },
               modifier = Modifier.fillMaxWidth(),
               enabled = !selectedAssetIsAnimated,
+              supportingText =
+                if (selectedAssetIsAnimated) {
+                  stringResource(R.string.sticker_animation_recorded_note)
+                } else {
+                  null
+                },
               itemLabelProvider = { stringResource(it.labelRes()) },
             )
-            if (selectedAssetIsAnimated) {
-              Text(
-                text = stringResource(R.string.sticker_animation_recorded_note),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
-              )
-            }
             Spacer(Modifier.height(dimensionResource(R.dimen.large_padding)))
             Row(
               horizontalArrangement = Arrangement.spacedBy(dimensionResource(R.dimen.large_padding))
@@ -514,7 +569,13 @@ class EffectActivity : ComponentActivity() {
                 modifier = Modifier.padding(top = dimensionResource(R.dimen.large_padding)),
               )
               uiState.placedStickers.forEach { sticker ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                val editDescription = stringResource(R.string.edit_sticker, sticker.assetName)
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  // Group the row's text into one focus stop; the buttons stay individually
+                  // focusable and carry the sticker's name in their descriptions.
+                  modifier = Modifier.semantics(mergeDescendants = true) {},
+                ) {
                   Text(
                     text = sticker.assetName,
                     style = MaterialTheme.typography.bodyLarge,
@@ -523,6 +584,7 @@ class EffectActivity : ComponentActivity() {
                   OutlinedButton(
                     enabled = uiState.stickerPlacement is StickerPlacement.Inactive,
                     onClick = { viewModel.editPlacedSticker(sticker.id) },
+                    modifier = Modifier.semantics { contentDescription = editDescription },
                   ) {
                     Text(text = stringResource(R.string.edit))
                   }
@@ -532,7 +594,8 @@ class EffectActivity : ComponentActivity() {
                   ) {
                     Icon(
                       imageVector = Icons.TwoTone.Delete,
-                      contentDescription = stringResource(R.string.delete_sticker),
+                      contentDescription =
+                        stringResource(R.string.delete_sticker, sticker.assetName),
                     )
                   }
                 }
@@ -620,6 +683,11 @@ class EffectActivity : ComponentActivity() {
 }
 
 private const val CONTROLS_VISIBILITY_TIMEOUT_MS = 3000L
+
+/** Fraction of the video content rect a sticker moves per accessibility nudge action. */
+private const val NUDGE_FRACTION = 0.05f
+/** Scale step per accessibility grow/shrink action. */
+private const val NUDGE_ZOOM_FACTOR = 1.1f
 
 private fun StickerAnimation.labelRes(): Int =
   when (this) {

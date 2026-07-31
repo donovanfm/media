@@ -61,7 +61,15 @@
   <string name="place_sticker">Place sticker</string>
   <string name="placed_stickers">Placed stickers</string>
   <string name="edit">Edit</string>
-  <string name="delete_sticker">Delete sticker</string>
+  <string name="edit_sticker">Edit %1$s</string>
+  <string name="delete_sticker">Delete %1$s</string>
+  <string name="sticker_action_move_left">Move left</string>
+  <string name="sticker_action_move_right">Move right</string>
+  <string name="sticker_action_move_up">Move up</string>
+  <string name="sticker_action_move_down">Move down</string>
+  <string name="sticker_action_grow">Grow</string>
+  <string name="sticker_action_shrink">Shrink</string>
+  <string name="sticker_position_description">%1$d%% from the left, %2$d%% from the top, at %3$s scale</string>
   <string name="done">Done</string>
   <string name="cancel">Cancel</string>
   <string name="sticker_placement_banner">Placing %1$s — drag to move, pinch to resize</string>
