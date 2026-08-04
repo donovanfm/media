@@ -42,6 +42,12 @@ internal sealed interface CreationPhase {
   /** An animated recording is in progress; [frameCount] frames captured so far. */
   data class Recording(val frameCount: Int) : CreationPhase
 
+  /**
+   * A finished recording's frames are being segmented; [processedCount] of [totalCount] done.
+   * Capture and segmentation are decoupled so recording stays smooth however slow inference is.
+   */
+  data class Processing(val processedCount: Int, val totalCount: Int) : CreationPhase
+
   /** An animated recording is ready to preview and save. */
   data class AnimatedPreview(val animation: AnimatedSticker) : CreationPhase
 

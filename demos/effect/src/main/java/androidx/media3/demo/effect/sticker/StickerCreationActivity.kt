@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -58,6 +59,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -169,7 +171,9 @@ class StickerCreationActivity : ComponentActivity() {
   @Composable
   private fun ModeSelector(viewModel: StickerCreationViewModel, uiState: StickerCreationUiState) {
     val recordingOrSaving =
-      uiState.phase is CreationPhase.Recording || uiState.phase == CreationPhase.Saving
+      uiState.phase is CreationPhase.Recording ||
+        uiState.phase is CreationPhase.Processing ||
+        uiState.phase == CreationPhase.Saving
     SingleChoiceSegmentedButtonRow {
       StickerMode.entries.forEachIndexed { index, mode ->
         SegmentedButton(
@@ -207,7 +211,9 @@ class StickerCreationActivity : ComponentActivity() {
       }
     OutlinedButton(
       enabled =
-        uiState.phase !is CreationPhase.Recording && uiState.phase != CreationPhase.Saving,
+        uiState.phase !is CreationPhase.Recording &&
+          uiState.phase !is CreationPhase.Processing &&
+          uiState.phase != CreationPhase.Saving,
       onClick = { pickMedia.launch(PickVisualMediaRequest(PickVisualMedia.ImageAndVideo)) },
     ) {
       Text(text = stringResource(R.string.sticker_choose_media))
@@ -236,7 +242,7 @@ class StickerCreationActivity : ComponentActivity() {
             contentScale = ContentScale.FillBounds,
             modifier = Modifier.fillMaxSize().segmentGestures(uiState.mode, viewModel),
           )
-          MaskOverlay(uiState.phase)
+          MaskOverlay(uiState.phase, onCancelProcessing = { viewModel.cancelProcessing() })
         }
       } else {
         // Sizing the TextureView to the video's aspect ratio keeps the surface undistorted and
@@ -265,7 +271,7 @@ class StickerCreationActivity : ComponentActivity() {
             },
             modifier = Modifier.fillMaxSize().segmentGestures(uiState.mode, viewModel),
           )
-          MaskOverlay(uiState.phase)
+          MaskOverlay(uiState.phase, onCancelProcessing = { viewModel.cancelProcessing() })
           if (uiState.sourceAspectRatio <= 0f) {
             // Video is still buffering; the surface underneath is already attached so playback
             // can start.
@@ -314,7 +320,7 @@ class StickerCreationActivity : ComponentActivity() {
     }
 
   @Composable
-  private fun MaskOverlay(phase: CreationPhase) {
+  private fun MaskOverlay(phase: CreationPhase, onCancelProcessing: () -> Unit) {
     when (phase) {
       CreationPhase.Segmenting ->
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -343,6 +349,35 @@ class StickerCreationActivity : ComponentActivity() {
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(start = dimensionResource(R.dimen.small_padding)),
           )
+        }
+      is CreationPhase.Processing ->
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          modifier =
+            Modifier.padding(dimensionResource(R.dimen.regular_padding))
+              // Scrimmed so the status stays legible over arbitrary video content.
+              .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+              .padding(dimensionResource(R.dimen.regular_padding)),
+        ) {
+          Text(
+            text =
+              stringResource(
+                R.string.sticker_processing_status,
+                phase.processedCount,
+                phase.totalCount,
+              ),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyLarge,
+          )
+          LinearProgressIndicator(
+            progress = {
+              if (phase.totalCount > 0) phase.processedCount / phase.totalCount.toFloat() else 0f
+            },
+            modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
+          )
+          TextButton(onClick = onCancelProcessing) {
+            Text(text = stringResource(R.string.cancel), color = Color.White)
+          }
         }
       else -> {}
     }

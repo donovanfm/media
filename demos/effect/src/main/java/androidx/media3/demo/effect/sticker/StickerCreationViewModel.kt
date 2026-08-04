@@ -40,6 +40,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -185,7 +186,11 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   fun setMode(mode: StickerMode) {
     val currentState = _uiState.value
     val phase = currentState.phase
-    if (phase is CreationPhase.Recording || phase == CreationPhase.Saving) {
+    if (
+      phase is CreationPhase.Recording ||
+        phase is CreationPhase.Processing ||
+        phase == CreationPhase.Saving
+    ) {
       return
     }
     if (mode == StickerMode.ANIMATED && currentState.sourceImage != null) {
@@ -266,11 +271,14 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   }
 
   /**
-   * Starts recording an animated sticker at [point]. The video keeps playing; each iteration of
-   * the capture loop grabs the current frame, segments at the finger's latest position, and
-   * accumulates the cutout — inference latency is the frame pacing, so frames rendered while the
-   * segmenter is busy are implicitly dropped and no frame is ever segmented stale. Recording ends
-   * when the finger lifts ([stopRecording]), a capacity cap is hit, or an error occurs.
+   * Starts recording an animated sticker at [point]. Capture and segmentation are deliberately
+   * decoupled: while the finger is down the video keeps playing and frames are only *stored* —
+   * sampled every [CAPTURE_INTERVAL_MS] together with the finger's position and a timestamp — so
+   * the recording gesture stays smooth no matter how slow segmentation is on the device. When the
+   * finger lifts ([stopRecording]) or a capacity cap is hit, the stored frames are segmented as a
+   * batch behind a progress indicator ([processRecordedFrames]). Real capture timestamps ride
+   * along with each frame, so playback timing is unaffected by either the sampling interval or
+   * inference speed.
    */
   fun startRecording(point: NormalizedPoint) {
     val currentState = _uiState.value
@@ -284,64 +292,93 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     latestPoint = point
     captureJob =
       viewModelScope.launch {
-        val recorder = StickerFrameRecorder()
+        val recordedFrames = mutableListOf<RecordedFrame>()
         val startTimeNs = SystemClock.elapsedRealtimeNanos()
-        var reusableFrame: Bitmap? = null
-        var framePixels: IntArray? = null
         _uiState.update { it.copy(phase = CreationPhase.Recording(0)) }
-        while (isActive && !recorder.isFull) {
+        while (isActive && recordedFrames.size < MAX_RECORDED_FRAMES) {
           val fingerPoint = latestPoint ?: break
-          val frame = frameSource?.captureFrame(reusableFrame) ?: break
-          reusableFrame = frame
+          // Every frame needs its own bitmap (no reuse): all of them stay alive until the
+          // processing pass has segmented them. They are left to the GC afterwards — recycling
+          // explicitly would race an abandoned segmentation still reading a frame natively.
+          val frame = frameSource?.captureFrame(null) ?: break
           val timestampUs = (SystemClock.elapsedRealtimeNanos() - startTimeNs) / 1000
-          // A failed or timed-out segmentation ends the recording but keeps the frames captured
-          // so far — better a short sticker than a discarded one. The timeout also protects the
-          // UI from a wedged native call (segment() abandons the wait; the engine thread keeps
-          // running the call in the background).
-          val mask =
-            try {
-              withTimeoutOrNull(SEGMENT_TIMEOUT_MS) {
-                segmenterEngine.segment(frame, fingerPoint.x, fingerPoint.y)
-              }
-            } catch (e: SegmenterEngine.SegmentationException) {
-              null
-            }
-          if (mask == null) {
-            Log.w(TAG, "Segmentation failed or timed out; ending recording early")
-            break
-          }
-          if (mask.width != frame.width || mask.height != frame.height) {
-            Log.w(TAG, "Mask ${mask.width}x${mask.height} != frame ${frame.width}x${frame.height}")
-            break
-          }
-          val pixels =
-            framePixels?.takeIf { it.size == frame.width * frame.height }
-              ?: IntArray(frame.width * frame.height).also { framePixels = it }
-          withContext(Dispatchers.Default) {
-            val alphaMask =
-              SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
-            frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
-            recorder.addFrame(pixels, frame.width, alphaMask, timestampUs)
-          }
-          _uiState.update { it.copy(phase = CreationPhase.Recording(recorder.frameCount)) }
+          recordedFrames += RecordedFrame(frame, fingerPoint, timestampUs)
+          _uiState.update { it.copy(phase = CreationPhase.Recording(recordedFrames.size)) }
+          delay(CAPTURE_INTERVAL_MS)
         }
         player.pause()
-        val composed = withContext(Dispatchers.Default) { recorder.composeFrames() }
-        if (composed == null) {
-          _uiState.update {
-            it.copy(
-              phase = CreationPhase.Playing,
-              errorMessage = getString(R.string.sticker_error_empty_mask),
-            )
-          }
-          player.play()
-        } else {
-          pendingAnimated = composed
-          _uiState.update {
-            it.copy(phase = CreationPhase.AnimatedPreview(composed.toAnimatedSticker()))
-          }
-        }
+        processRecordedFrames(recordedFrames)
       }
+  }
+
+  /**
+   * Segments the recorded frames into an animation, updating [CreationPhase.Processing] progress
+   * along the way. A failed or timed-out segmentation stops the pass but keeps the frames
+   * processed so far — better a short sticker than a discarded one. The timeout also protects
+   * the UI from a wedged native call (segment() abandons the wait; the engine thread keeps
+   * running the call in the background).
+   */
+  private suspend fun processRecordedFrames(recordedFrames: List<RecordedFrame>) {
+    val recorder = StickerFrameRecorder()
+    var framePixels: IntArray? = null
+    _uiState.update { it.copy(phase = CreationPhase.Processing(0, recordedFrames.size)) }
+    for ((index, recorded) in recordedFrames.withIndex()) {
+      if (recorder.isFull) {
+        break
+      }
+      val frame = recorded.frame
+      val mask =
+        try {
+          withTimeoutOrNull(SEGMENT_TIMEOUT_MS) {
+            segmenterEngine.segment(frame, recorded.point.x, recorded.point.y)
+          }
+        } catch (e: SegmenterEngine.SegmentationException) {
+          null
+        }
+      if (mask == null) {
+        Log.w(TAG, "Segmentation failed or timed out; keeping ${recorder.frameCount} frames")
+        break
+      }
+      if (mask.width != frame.width || mask.height != frame.height) {
+        Log.w(TAG, "Mask ${mask.width}x${mask.height} != frame ${frame.width}x${frame.height}")
+        break
+      }
+      val pixels =
+        framePixels?.takeIf { it.size == frame.width * frame.height }
+          ?: IntArray(frame.width * frame.height).also { framePixels = it }
+      withContext(Dispatchers.Default) {
+        val alphaMask =
+          SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
+        frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+        recorder.addFrame(pixels, frame.width, alphaMask, recorded.timestampUs)
+      }
+      _uiState.update { it.copy(phase = CreationPhase.Processing(index + 1, recordedFrames.size)) }
+    }
+    val composed = withContext(Dispatchers.Default) { recorder.composeFrames() }
+    if (composed == null) {
+      _uiState.update {
+        it.copy(
+          phase = CreationPhase.Playing,
+          errorMessage = getString(R.string.sticker_error_empty_mask),
+        )
+      }
+      player.play()
+    } else {
+      pendingAnimated = composed
+      _uiState.update {
+        it.copy(phase = CreationPhase.AnimatedPreview(composed.toAnimatedSticker()))
+      }
+    }
+  }
+
+  /** Cancels an in-progress processing pass, discarding the recording. */
+  fun cancelProcessing() {
+    if (_uiState.value.phase !is CreationPhase.Processing) {
+      return
+    }
+    captureJob?.cancel()
+    _uiState.update { it.copy(phase = CreationPhase.Playing) }
+    resumeSource()
   }
 
   /** Tracks the finger during recording so the segmentation point follows the object. */
@@ -501,6 +538,13 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
 
   private fun getString(resId: Int): String = getApplication<Application>().getString(resId)
 
+  /** A frame stored during recording, segmented later by the processing pass. */
+  private class RecordedFrame(
+    val frame: Bitmap,
+    val point: NormalizedPoint,
+    val timestampUs: Long,
+  )
+
   companion object {
     private const val TAG = "StickerCreation"
 
@@ -510,5 +554,17 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
 
     /** Watchdog for a single segmentation; generous even for cold-start CPU inference. */
     private const val SEGMENT_TIMEOUT_MS = 5_000L
+
+    /**
+     * Sampling interval while recording (~4 fps): enough frames for a lively loop while keeping
+     * memory and post-processing time bounded.
+     */
+    private const val CAPTURE_INTERVAL_MS = 250L
+
+    /**
+     * Cap on stored frames: 15 seconds at the sampling interval, ~35 MB of 512px RGBA bitmaps.
+     * [StickerFrameRecorder] applies its own composed-size caps during processing.
+     */
+    private const val MAX_RECORDED_FRAMES = 60
   }
 }

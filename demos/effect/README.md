@@ -10,8 +10,11 @@ bakes it into playback as a `BitmapOverlay`.
 Custom stickers can be created from the loaded video with MediaPipe
 interactive segmentation: long-press an object on a paused frame for a static
 sticker, or switch to animated mode and hold the object while the video plays —
-frames are recorded (follow the object with your finger) until you lift, and
-the result plays back as a looping animated overlay.
+frames are recorded (follow the object with your finger) until you lift, then
+segmented in a short processing pass, and the result plays back as a looping
+animated overlay. Recording samples frames at a fixed rate and defers
+segmentation until after the gesture, so capture stays smooth regardless of
+how fast the device runs the model.
 
 See the [demos README](../README.md) for instructions on how to build and run
 this demo.
