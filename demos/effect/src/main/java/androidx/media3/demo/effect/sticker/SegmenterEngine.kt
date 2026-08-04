@@ -184,15 +184,22 @@ internal class SegmenterEngine(
   ): ConfidenceMask {
     // Don't close the input image: closing a bitmap-backed MPImage recycles the bitmap, which the
     // caller reuses for the next capture.
+    // Despite the class name, the legacy task expects the region-of-interest keypoint in image
+    // PIXEL coordinates, not normalized [0, 1] — Google's own interactive segmentation sample
+    // multiplies by the bitmap size the same way. A normalized keypoint silently prompts the
+    // model at the top-left corner instead.
     val result =
       segmenter.segment(
         BitmapImageBuilder(frame).build(),
-        InteractiveSegmenterLegacy.RegionOfInterest.create(NormalizedKeypoint.create(x, y)),
+        InteractiveSegmenterLegacy.RegionOfInterest.create(
+          NormalizedKeypoint.create(x * frame.width, y * frame.height)
+        ),
       )
     // Mask images are backed by a fixed-size native buffer pool. Every one MUST be closed after
     // its data is copied out, or the pool runs dry and a later segment() call blocks forever
     // inside native code (in practice: recording froze after ~3 frames).
     val masks = result.confidenceMasks().orElse(emptyList())
+    Log.d(TAG, "Segmenter returned ${masks.size} confidence mask(s)")
     try {
       val mask =
         masks.firstOrNull() ?: throw SegmentationException("Segmenter returned no confidence mask")
