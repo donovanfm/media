@@ -35,7 +35,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,11 +59,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import androidx.media3.common.util.ExperimentalApi
@@ -115,7 +120,7 @@ class EffectActivity : ComponentActivity() {
           viewModel.selectMediaItems(mediaItems)
         }
         PlayerScreen(viewModel.exoPlayer)
-        EffectControls(viewModel, uiState)
+        EffectControlsList(viewModel, uiState)
       }
     }
   }
@@ -173,18 +178,6 @@ class EffectActivity : ComponentActivity() {
   }
 
   @Composable
-  private fun EffectControls(viewModel: EffectViewModel, uiState: EffectUiState) {
-    Button(
-      enabled = uiState.effectsEnabled && uiState.effectsChanged,
-      onClick = { viewModel.applyEffects() },
-    ) {
-      Text(text = stringResource(id = R.string.apply_effects))
-    }
-
-    EffectControlsList(viewModel, uiState)
-  }
-
-  @Composable
   private fun EffectControlsList(viewModel: EffectViewModel, uiState: EffectUiState) {
     LazyColumn(Modifier.padding(vertical = dimensionResource(id = R.dimen.small_padding))) {
       item {
@@ -194,15 +187,22 @@ class EffectActivity : ComponentActivity() {
           checked = uiState.contrastChecked,
           onCheckedChange = { checked -> viewModel.updateContrastChecked(checked) },
         ) {
+          // The slider tracks the drag locally and only updates the ViewModel when the drag ends:
+          // effects apply immediately on every state change, and rebuilding the player's effects
+          // pipeline on each drag tick would be wasteful.
+          var contrastValue by remember(uiState.contrastValue) {
+            mutableFloatStateOf(uiState.contrastValue)
+          }
           Row {
             Text(
-              text = "%.2f".format(uiState.contrastValue),
+              text = "%.2f".format(contrastValue),
               style = MaterialTheme.typography.bodyLarge,
               modifier = Modifier.padding(dimensionResource(id = R.dimen.large_padding)).weight(1f),
             )
             Slider(
-              value = uiState.contrastValue,
-              onValueChange = { viewModel.updateContrast(it) },
+              value = contrastValue,
+              onValueChange = { contrastValue = it },
+              onValueChangeFinished = { viewModel.updateContrast(contrastValue) },
               valueRange = -1f..1f,
               modifier = Modifier.weight(4f),
             )
@@ -255,32 +255,52 @@ class EffectActivity : ComponentActivity() {
           onCheckedChange = { checked -> viewModel.updateTextChecked(checked) },
         ) {
           Column {
+            // Free text is committed on IME "done" or when focus leaves the field, rather than on
+            // every keystroke: effects apply immediately on every state change, and rebuilding
+            // the player's effects pipeline per character would be wasteful.
+            var text by remember(uiState.textOverlayText) {
+              mutableStateOf(uiState.textOverlayText ?: "")
+            }
+            val focusManager = LocalFocusManager.current
             OutlinedTextField(
-              value = uiState.textOverlayText ?: "",
-              onValueChange = { viewModel.updateText(it.ifEmpty { null }) },
+              value = text,
+              onValueChange = { text = it },
               label = { Text(stringResource(R.string.text)) },
               singleLine = true,
+              keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+              keyboardActions =
+                KeyboardActions(onDone = { focusManager.clearFocus() }),
               modifier =
-                Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
+                Modifier.fillMaxWidth()
+                  .padding(bottom = dimensionResource(R.dimen.large_padding))
+                  .onFocusChanged { focusState ->
+                    if (!focusState.isFocused) {
+                      viewModel.updateText(text.ifEmpty { null })
+                    }
+                  },
             )
             Row {
               ColorsDropDownMenu(uiState.textOverlayColor) { color ->
                 viewModel.updateTextColor(color)
               }
             }
+            // Like the contrast slider, the alpha slider applies when the drag ends.
+            var alphaValue by remember(uiState.textOverlayAlpha) {
+              mutableFloatStateOf(uiState.textOverlayAlpha)
+            }
             Row {
               Text(
-                text = stringResource(R.string.alpha) + " = %.2f".format(uiState.textOverlayAlpha),
+                text = stringResource(R.string.alpha) + " = %.2f".format(alphaValue),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier =
                   Modifier.padding(dimensionResource(id = R.dimen.large_padding)).weight(1f),
               )
               Slider(
-                value = uiState.textOverlayAlpha,
+                value = alphaValue,
                 onValueChange = { newAlphaValue ->
-                  val newRoundedAlphaValue = "%.2f".format(Locale.ROOT, newAlphaValue).toFloat()
-                  viewModel.updateTextAlpha(newRoundedAlphaValue)
+                  alphaValue = "%.2f".format(Locale.ROOT, newAlphaValue).toFloat()
                 },
+                onValueChangeFinished = { viewModel.updateTextAlpha(alphaValue) },
                 valueRange = 0f..1f,
                 modifier = Modifier.weight(2f),
               )

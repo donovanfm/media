@@ -17,7 +17,6 @@
   <string name="app_name">Effect Demo</string>
   <string name="choose_preset_input">Choose preset input</string>
   <string name="choose_local_file">Choose local file</string>
-  <string name="apply_effects">Apply effects</string>
   <string name="ok">OK</string>
   <string name="playlist_loading_error">Error loading playlist from %1$s: %2$s</string>
   <string name="no_loaded_playlists_error">There are no loaded preset inputs.</string>
