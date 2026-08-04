@@ -45,8 +45,9 @@ import kotlinx.coroutines.withContext
 /**
  * [AndroidViewModel] for the effect demo application.
  *
- * This ViewModel manages the [ExoPlayer] instance, loads playlists, and provides methods to update
- * and apply video effects based on the current [EffectUiState].
+ * This ViewModel manages the [ExoPlayer] instance, loads playlists, and keeps the player's video
+ * effects in sync with the current [EffectUiState]: every effect-control change re-applies the
+ * effects immediately (see [updateAndApply]) — there is no separate "apply" step.
  */
 @OptIn(UnstableApi::class)
 internal class EffectViewModel(application: Application) : AndroidViewModel(application) {
@@ -127,18 +128,34 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Updates the player with a new list of [MediaItem]s to play, clearing any active video effects
-   * and enabling effect controls in the UI.
+   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the
+   * UI. The effect controls keep their values across media switches, and [applyEffects] carries
+   * them over to the new media — the player always mirrors the controls.
    *
    * @param mediaItems The list of media items to play.
    */
   fun selectMediaItems(mediaItems: List<MediaItem>) {
     exoPlayer.apply {
       setMediaItems(mediaItems)
-      setVideoEffects(emptyList())
       prepare()
     }
-    _uiState.update { it.copy(effectsEnabled = true, effectsChanged = false) }
+    _uiState.update { it.copy(effectsEnabled = true) }
+    applyEffects()
+  }
+
+  /**
+   * Applies [transform] to the UI state and immediately re-applies the video effects, unless the
+   * state is unchanged (which avoids needlessly rebuilding the player's effects pipeline). Every
+   * effect control funnels through here — the player always reflects what the controls show.
+   */
+  private inline fun updateAndApply(transform: (EffectUiState) -> EffectUiState) {
+    val oldState = _uiState.value
+    val newState = transform(oldState)
+    if (newState == oldState) {
+      return
+    }
+    _uiState.value = newState
+    applyEffects()
   }
 
   /**
@@ -147,9 +164,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param checked Whether the contrast effect checkbox is checked.
    */
   fun updateContrastChecked(checked: Boolean) {
-    _uiState.update {
+    updateAndApply {
       val value = if (checked) it.contrastValue else 0f
-      it.copy(contrastChecked = checked, contrastValue = value, effectsChanged = true)
+      it.copy(contrastChecked = checked, contrastValue = value)
     }
   }
 
@@ -159,7 +176,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param value The contrast value in the range of -1f to 1f.
    */
   fun updateContrast(value: Float) {
-    _uiState.update { it.copy(contrastValue = value, effectsChanged = true) }
+    updateAndApply { it.copy(contrastValue = value) }
   }
 
   /**
@@ -168,7 +185,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param checked Whether the confetti overlay checkbox is checked.
    */
   fun updateConfetti(checked: Boolean) {
-    _uiState.update { it.copy(confettiOverlayChecked = checked, effectsChanged = true) }
+    updateAndApply { it.copy(confettiOverlayChecked = checked) }
   }
 
   /**
@@ -177,7 +194,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param checked Whether the clock overlay checkbox is checked.
    */
   fun updateClock(checked: Boolean) {
-    _uiState.update { it.copy(clockOverlayChecked = checked, effectsChanged = true) }
+    updateAndApply { it.copy(clockOverlayChecked = checked) }
   }
 
   /**
@@ -186,7 +203,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param checked Whether the Lottie overlay checkbox is checked.
    */
   fun updateLottieChecked(checked: Boolean) {
-    _uiState.update { it.copy(lottieOverlayChecked = checked, effectsChanged = true) }
+    updateAndApply { it.copy(lottieOverlayChecked = checked) }
   }
 
   /**
@@ -195,7 +212,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param name The display name of the Lottie effect to apply.
    */
   fun updateLottieName(name: String) {
-    _uiState.update { it.copy(lottieOverlayName = name, effectsChanged = true) }
+    updateAndApply { it.copy(lottieOverlayName = name) }
   }
 
   /**
@@ -204,10 +221,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param checked Whether the custom text overlay checkbox is checked.
    */
   fun updateTextChecked(checked: Boolean) {
-    _uiState.update {
-      val effectsChanged = !checked // Replicating original logic
-      it.copy(textOverlayChecked = checked, effectsChanged = effectsChanged)
-    }
+    updateAndApply { it.copy(textOverlayChecked = checked) }
   }
 
   /**
@@ -216,7 +230,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param text The text string to display, or null if empty.
    */
   fun updateText(text: String?) {
-    _uiState.update { it.copy(textOverlayText = text, effectsChanged = true) }
+    updateAndApply { it.copy(textOverlayText = text) }
   }
 
   /**
@@ -225,9 +239,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param color The [Color] to apply to the overlay text.
    */
   fun updateTextColor(color: Color) {
-    _uiState.update {
-      it.copy(textOverlayColor = color, effectsChanged = it.textOverlayText != null)
-    }
+    updateAndApply { it.copy(textOverlayColor = color) }
   }
 
   /**
@@ -236,16 +248,14 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * @param alpha The alpha scale from 0f (transparent) to 1f (opaque).
    */
   fun updateTextAlpha(alpha: Float) {
-    _uiState.update {
-      it.copy(textOverlayAlpha = alpha, effectsChanged = it.textOverlayText != null)
-    }
+    updateAndApply { it.copy(textOverlayAlpha = alpha) }
   }
 
   /**
    * Builds the video effects list based on the current [EffectUiState] and applies them to the
    * underlying [ExoPlayer].
    */
-  fun applyEffects() {
+  private fun applyEffects() {
     val currentState = _uiState.value
     val listBuilder = ImmutableList.builder<Effect>()
 
@@ -291,7 +301,6 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
       setVideoEffects(listBuilder.build())
       prepare()
     }
-    _uiState.update { it.copy(effectsChanged = false) }
   }
 
   /** Clears any active error message in the [EffectUiState]. */

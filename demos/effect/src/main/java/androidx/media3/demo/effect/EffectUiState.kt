@@ -22,7 +22,6 @@ import com.google.common.collect.ImmutableList
 /** UI state for the effect demo application. */
 internal data class EffectUiState(
   val effectsEnabled: Boolean = false,
-  val effectsChanged: Boolean = false,
   val contrastChecked: Boolean = false,
   val contrastValue: Float = 0f,
   val confettiOverlayChecked: Boolean = false,
