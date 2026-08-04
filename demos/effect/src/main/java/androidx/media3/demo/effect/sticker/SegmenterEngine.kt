@@ -25,9 +25,7 @@ import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.components.containers.NormalizedKeypoint
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
-import com.google.mediapipe.tasks.vision.interactivesegmenter.InteractiveSegmenter
-import com.google.mediapipe.tasks.vision.interactivesegmenter.InteractiveSegmenterOptions
-import com.google.mediapipe.tasks.vision.interactivesegmenter.Stroke
+import com.google.mediapipe.tasks.vision.interactivesegmenterlegacy.InteractiveSegmenterLegacy
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.Executors
@@ -39,14 +37,22 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /**
- * Lifecycle-safe wrapper around MediaPipe's [InteractiveSegmenter] (tasks-vision 1.0 API).
+ * Lifecycle-safe wrapper around MediaPipe's [InteractiveSegmenterLegacy].
+ *
+ * Why the legacy task instead of the tasks-vision 1.0 `InteractiveSegmenter`: the 1.0 API only
+ * accepts the v2 int8 model bundle, which has no published model card or benchmark, appears to
+ * target NPU delegates that current Pixel devices don't expose, and measured ~800 ms/frame on a
+ * Pixel 9 Pro CPU (512x288 input). The legacy float32 MagicTouch model is the one Google
+ * actually benchmarks for this task (130 ms CPU on a Pixel 6, per the interactive segmenter
+ * task guide) and is several times faster on the same hardware. Revisit once a benchmarked,
+ * CPU-friendly v2 bundle ships.
  *
  * All native calls — creation, every [segment], and [close] — are confined to one single-thread
  * executor, so closing the engine can never interleave with an in-flight native segmentation (the
  * close task queues behind it). Create the engine once per screen, call [prepare] before use, and
  * [close] it deterministically; the segmenter holds a native interpreter plus the 6 MB model.
  *
- * [prepare] walks a delegate preference chain (NPU, GPU, CPU), and inference failures advance the
+ * [prepare] walks a delegate preference chain (CPU, NPU, GPU), and inference failures advance the
  * chain too, since hardware delegates can initialize on devices that can't actually run the model
  * (emulators, notably).
  */
@@ -66,7 +72,7 @@ internal class SegmenterEngine(
   private val dispatcher = executor.asCoroutineDispatcher()
 
   // Confined to the engine thread.
-  private var segmenter: InteractiveSegmenter? = null
+  private var segmenter: InteractiveSegmenterLegacy? = null
   private var delegateIndex = 0
 
   @Volatile private var closed = false
@@ -78,8 +84,7 @@ internal class SegmenterEngine(
 
   /**
    * Creates the segmenter if it doesn't exist yet, trying delegates in [DELEGATE_PREFERENCE]
-   * order: NPU first (the int8 model bundle is exactly what NPUs run best), then GPU, then CPU.
-   * Idempotent. Throws [SegmentationException] when no delegate works.
+   * order. Idempotent. Throws [SegmentationException] when no delegate works.
    */
   suspend fun prepare() {
     withContext(dispatcher) {
@@ -95,7 +100,7 @@ internal class SegmenterEngine(
    * [DELEGATE_PREFERENCE], updating [segmenter]/[activeDelegate]. Engine thread only. Throws
    * [SegmentationException] when the rest of the chain is exhausted.
    */
-  private fun createFromChain(startIndex: Int): InteractiveSegmenter {
+  private fun createFromChain(startIndex: Int): InteractiveSegmenterLegacy {
     var lastFailure: RuntimeException? = null
     for (i in startIndex until DELEGATE_PREFERENCE.size) {
       val delegate = DELEGATE_PREFERENCE[i]
@@ -104,20 +109,20 @@ internal class SegmenterEngine(
         segmenter = created
         delegateIndex = i
         activeDelegate = delegate
-        Log.i(TAG, "InteractiveSegmenter ready with the $delegate delegate")
+        Log.i(TAG, "Interactive segmenter ready with the $delegate delegate")
         return created
       } catch (e: RuntimeException) {
         Log.i(TAG, "$delegate delegate unavailable", e)
         lastFailure = e
       }
     }
-    Log.e(TAG, "Failed to initialize InteractiveSegmenter", lastFailure)
-    throw SegmentationException("Failed to initialize InteractiveSegmenter", lastFailure)
+    Log.e(TAG, "Failed to initialize the interactive segmenter", lastFailure)
+    throw SegmentationException("Failed to initialize the interactive segmenter", lastFailure)
   }
 
   /**
    * Segments the object in [frame] at the normalized point ([x], [y]) and returns its confidence
-   * mask. The point is submitted as a single-point positive brush stroke.
+   * mask. The point is submitted as a single-keypoint region of interest.
    *
    * Hardware inference is only initialized by the graph on the first segmentation — creating the
    * segmenter with an NPU or GPU delegate can succeed on devices that can't actually run the
@@ -139,7 +144,7 @@ internal class SegmenterEngine(
           continuation.cancel(CancellationException("SegmenterEngine is closed"))
           return@execute
         }
-        var segmenter: InteractiveSegmenter = initialSegmenter
+        var segmenter: InteractiveSegmenterLegacy = initialSegmenter
         while (true) {
           try {
             val startTimeMs = SystemClock.elapsedRealtime()
@@ -172,31 +177,28 @@ internal class SegmenterEngine(
   }
 
   private fun runSegmentation(
-    segmenter: InteractiveSegmenter,
+    segmenter: InteractiveSegmenterLegacy,
     frame: Bitmap,
     x: Float,
     y: Float,
   ): ConfidenceMask {
     // Don't close the input image: closing a bitmap-backed MPImage recycles the bitmap, which the
     // caller reuses for the next capture.
-    segmenter.setImage(BitmapImageBuilder(frame).build())
-    val mask =
+    val result =
       segmenter.segment(
-        listOf(
-          Stroke.builder()
-            .setBrushMode(Stroke.BrushMode.POSITIVE)
-            .setPoints(listOf(NormalizedKeypoint.create(x, y)))
-            .setCompleted(true)
-            .build()
-        )
+        BitmapImageBuilder(frame).build(),
+        InteractiveSegmenterLegacy.RegionOfInterest.create(NormalizedKeypoint.create(x, y)),
       )
-    // The mask is backed by a fixed-size native buffer pool. It MUST be closed after its data is
-    // copied out, or the pool runs dry and a later segment() call blocks forever inside native
-    // code (in practice: recording froze after ~3 frames).
-    return try {
-      toConfidenceMask(mask)
+    // Mask images are backed by a fixed-size native buffer pool. Every one MUST be closed after
+    // its data is copied out, or the pool runs dry and a later segment() call blocks forever
+    // inside native code (in practice: recording froze after ~3 frames).
+    val masks = result.confidenceMasks().orElse(emptyList())
+    try {
+      val mask =
+        masks.firstOrNull() ?: throw SegmentationException("Segmenter returned no confidence mask")
+      return toConfidenceMask(mask)
     } finally {
-      mask.close()
+      masks.forEach { it.close() }
     }
   }
 
@@ -216,14 +218,16 @@ internal class SegmenterEngine(
     executor.shutdown()
   }
 
-  private fun createSegmenter(delegate: Delegate): InteractiveSegmenter {
+  private fun createSegmenter(delegate: Delegate): InteractiveSegmenterLegacy {
     val options =
-      InteractiveSegmenterOptions.builder()
+      InteractiveSegmenterLegacy.InteractiveSegmenterLegacyOptions.builder()
         .setBaseOptions(
           BaseOptions.builder().setModelAssetPath(modelAssetPath).setDelegate(delegate).build()
         )
+        .setOutputConfidenceMasks(true)
+        .setOutputCategoryMask(false)
         .build()
-    return InteractiveSegmenter.createFromOptions(context, options)
+    return InteractiveSegmenterLegacy.createFromOptions(context, options)
   }
 
   /**
@@ -253,16 +257,16 @@ internal class SegmenterEngine(
 
   companion object {
     private const val TAG = "SegmenterEngine"
-    // Ordering chosen from on-device measurements (Pixel 9 Pro, 512x288 frames): CPU (XNNPACK)
-    // ~800ms with good masks; NPU identical to CPU (NNAPI is deprecated and resolves to a CPU
-    // path on recent devices); GPU ~1700ms AND produced corrupt masks for this int8 bundle. CPU
-    // is therefore the deterministic default, GPU strictly a last resort.
+    // Ordering chosen from on-device measurements (Pixel 9 Pro, 512x288 frames): the GPU
+    // delegate produced systematically corrupt masks with the previous int8 bundle (a known
+    // MediaPipe-on-Mali failure mode), and NPU resolves to a CPU path on current devices (NNAPI
+    // is deprecated). CPU is therefore the deterministic default, GPU strictly a last resort.
     private val DELEGATE_PREFERENCE = listOf(Delegate.CPU, Delegate.NPU, Delegate.GPU)
-    // The v2 task bundle required by the tasks-vision 1.0 InteractiveSegmenter (the legacy
-    // magic_touch.tflite only works with InteractiveSegmenterLegacy). Downloaded at build time;
-    // see downloadSegmenterModel in build.gradle.kts.
+    // The float32 MagicTouch model, used through InteractiveSegmenterLegacy — see the class KDoc
+    // for why it is preferred over the tasks-vision 1.0 API and its v2 int8 bundle. Downloaded at
+    // build time; see downloadSegmenterModel in build.gradle.kts.
     // Internal so the effect screen can check the asset's presence: builds made offline (or with
     // -PskipStickerModelDownload) don't bundle the model, and creation is disabled gracefully.
-    internal const val MODEL_ASSET_PATH = "interactive_segmentation.task"
+    internal const val MODEL_ASSET_PATH = "magic_touch.tflite"
   }
 }
