@@ -351,32 +351,33 @@ class StickerCreationActivity : ComponentActivity() {
           )
         }
       is CreationPhase.Processing ->
-        Column(
-          horizontalAlignment = Alignment.CenterHorizontally,
-          modifier =
-            Modifier.padding(dimensionResource(R.dimen.regular_padding))
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier =
               // Scrimmed so the status stays legible over arbitrary video content.
-              .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-              .padding(dimensionResource(R.dimen.regular_padding)),
-        ) {
-          Text(
-            text =
-              stringResource(
-                R.string.sticker_processing_status,
-                phase.processedCount,
-                phase.totalCount,
-              ),
-            color = Color.White,
-            style = MaterialTheme.typography.bodyLarge,
-          )
-          LinearProgressIndicator(
-            progress = {
-              if (phase.totalCount > 0) phase.processedCount / phase.totalCount.toFloat() else 0f
-            },
-            modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
-          )
-          TextButton(onClick = onCancelProcessing) {
-            Text(text = stringResource(R.string.cancel), color = Color.White)
+              Modifier.background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                .padding(dimensionResource(R.dimen.regular_padding)),
+          ) {
+            Text(
+              text =
+                stringResource(
+                  R.string.sticker_processing_status,
+                  phase.processedCount,
+                  phase.totalCount,
+                ),
+              color = Color.White,
+              style = MaterialTheme.typography.bodyLarge,
+            )
+            LinearProgressIndicator(
+              progress = {
+                if (phase.totalCount > 0) phase.processedCount / phase.totalCount.toFloat() else 0f
+              },
+              modifier = Modifier.padding(top = dimensionResource(R.dimen.small_padding)),
+            )
+            TextButton(onClick = onCancelProcessing) {
+              Text(text = stringResource(R.string.cancel), color = Color.White)
+            }
           }
         }
       else -> {}
