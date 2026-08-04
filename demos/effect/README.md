@@ -20,21 +20,19 @@ this demo.
 
 * This demo requires `minSdk` 24 (the rest of the repository builds against
   23) because of the MediaPipe `tasks-vision` dependency.
-* The MediaPipe interactive segmentation model (`magic_touch.tflite`, ~6 MB)
-  is downloaded automatically on first build by the `downloadSegmenterModel`
-  Gradle task, verified against a pinned SHA-256, and cached in the build
-  directory. Builds run with `--offline` or `-PskipStickerModelDownload` skip
-  the download and still succeed; the app then disables custom sticker
-  creation. To supply the model manually, download it from
-  https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/1/magic_touch.tflite
-  and place it at `demos/effect/buildout/downloadedAssets/magic_touch.tflite`
-  (it is checksum-verified like a downloaded one).
-* The demo deliberately uses `InteractiveSegmenterLegacy` with the float32
-  MagicTouch model rather than the tasks-vision 1.0 `InteractiveSegmenter`:
-  the 1.0 API only accepts the v2 int8 model bundle, which has no published
-  benchmark and measured several times slower on a Pixel 9 Pro CPU (the
-  float32 model is the one benchmarked on the interactive segmenter task
-  page). Revisit when a benchmarked, CPU-friendly v2 bundle ships.
+* The MediaPipe interactive segmentation model bundle
+  (`interactive_segmentation.task`, ~30 MB) is downloaded automatically on
+  first build by the `downloadSegmenterModel` Gradle task, verified against a
+  pinned SHA-256, and cached in the build directory. Builds run with
+  `--offline` or `-PskipStickerModelDownload` skip the download and still
+  succeed; the app then disables custom sticker creation. To supply the model
+  manually, download it from
+  https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task
+  and place it at
+  `demos/effect/buildout/downloadedAssets/interactive_segmentation.task` (it
+  is checksum-verified like a downloaded one). The legacy `magic_touch.tflite`
+  only works with `InteractiveSegmenterLegacy`, not the tasks-vision 1.0 API
+  this demo uses.
 * The segmentation model is the [MediaPipe interactive segmenter "magic
   touch" model](https://ai.google.dev/edge/mediapipe/solutions/vision/interactive_segmenter),
   provided by Google and subject to the license terms on its model page.

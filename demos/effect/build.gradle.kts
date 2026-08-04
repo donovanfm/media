@@ -67,20 +67,18 @@ android {
  */
 val downloadSegmenterModel by
   tasks.registering {
-    // The float32 MagicTouch model, used through InteractiveSegmenterLegacy. The tasks-vision
-    // 1.0 InteractiveSegmenter only accepts the newer v2 int8 bundle, which is unbenchmarked and
-    // measured ~6x slower on a Pixel 9 Pro CPU — see the SegmenterEngine KDoc for the full
-    // reasoning.
+    // The tasks-vision 1.0 InteractiveSegmenter requires the v2 .task bundle; the older
+    // magic_touch.tflite only works with InteractiveSegmenterLegacy.
     val modelUrl =
-      "https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/1/magic_touch.tflite"
-    val modelSha256 = "e24338a717c1b7ad8d159666677ef400babb7f33b8ad60c4d96db4ecf694cd25"
-    val outputFile = layout.buildDirectory.file("downloadedAssets/magic_touch.tflite")
+      "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task"
+    val modelSha256 = "38431bc66b883404e8397f74c3579404315b9b52b04a46c6346fe906a7309b03"
+    val outputFile = layout.buildDirectory.file("downloadedAssets/interactive_segmentation.task")
     val skipRequested =
       gradle.startParameter.isOffline ||
         providers.gradleProperty("skipStickerModelDownload").isPresent
     // Deliberately NOT registered as a task output: the model is a checksum-verified cache the
     // task manages itself. Registering it would let Gradle's stale-output cleanup delete it
-    // whenever the task implementation changes, forcing a pointless re-download.
+    // whenever the task implementation changes, forcing a pointless 30MB re-download.
     doLast {
       fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
