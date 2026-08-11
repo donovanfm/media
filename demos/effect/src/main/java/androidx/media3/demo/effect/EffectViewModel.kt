@@ -26,6 +26,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.VideoFrameProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
@@ -65,7 +66,11 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * when this ViewModel is cleared.
    */
   val exoPlayer: ExoPlayer by lazy {
-    ExoPlayer.Builder(application).build().apply { playWhenReady = true }
+    // The custom factory enables the replayable frame cache so effect changes can redraw the
+    // current frame while playback is paused; see RedrawEnabledRenderersFactory.
+    ExoPlayer.Builder(application, RedrawEnabledRenderersFactory(application))
+      .build()
+      .apply { playWhenReady = true }
   }
 
   private var lottieOverlayOptions: Map<String, Effect> = emptyMap()
@@ -300,6 +305,12 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     exoPlayer.apply {
       setVideoEffects(listBuilder.build())
       prepare()
+      if (!isPlaying) {
+        // A paused player renders no new frames on its own, so the changed effects would only
+        // become visible on resume. Passing REDRAW re-renders the current frame through the
+        // updated pipeline immediately (see the setVideoEffects javadoc).
+        setVideoEffects(VideoFrameProcessor.REDRAW)
+      }
     }
   }
 
