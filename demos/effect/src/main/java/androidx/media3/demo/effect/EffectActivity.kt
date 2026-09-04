@@ -191,9 +191,10 @@ class EffectActivity : ComponentActivity() {
           // The slider tracks the drag locally and only updates the ViewModel when the drag ends:
           // effects apply immediately on every state change, and rebuilding the player's effects
           // pipeline on each drag tick would be wasteful.
-          var contrastValue by remember(uiState.contrastValue) {
-            mutableFloatStateOf(uiState.contrastValue)
-          }
+          var contrastValue by
+            remember(uiState.contrastValue) {
+              mutableFloatStateOf(uiState.contrastValue)
+            }
           Row {
             Text(
               text = "%.2f".format(contrastValue),
@@ -242,7 +243,8 @@ class EffectActivity : ComponentActivity() {
                 options = uiState.lottieOverlayOptions,
                 onOptionSelected = { viewModel.updateLottieName(it) },
                 modifier =
-                  Modifier.fillMaxWidth().padding(bottom = dimensionResource(R.dimen.large_padding)),
+                  Modifier.fillMaxWidth()
+                    .padding(bottom = dimensionResource(R.dimen.large_padding)),
               )
             }
           }
@@ -270,8 +272,7 @@ class EffectActivity : ComponentActivity() {
               label = { Text(stringResource(R.string.text)) },
               singleLine = true,
               keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-              keyboardActions =
-                KeyboardActions(onDone = { focusManager.clearFocus() }),
+              keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
               modifier =
                 Modifier.fillMaxWidth()
                   .padding(bottom = dimensionResource(R.dimen.large_padding))
@@ -287,9 +288,10 @@ class EffectActivity : ComponentActivity() {
               }
             }
             // Like the contrast slider, the alpha slider applies when the drag ends.
-            var alphaValue by remember(uiState.textOverlayAlpha) {
-              mutableFloatStateOf(uiState.textOverlayAlpha)
-            }
+            var alphaValue by
+              remember(uiState.textOverlayAlpha) {
+                mutableFloatStateOf(uiState.textOverlayAlpha)
+              }
             Row {
               Text(
                 text = stringResource(R.string.alpha) + " = %.2f".format(alphaValue),

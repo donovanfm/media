@@ -145,9 +145,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the
-   * UI. The effect controls keep their values across media switches, and [applyEffects] carries
-   * them over to the new media — the player always mirrors the controls.
+   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the UI.
+   * The effect controls keep their values across media switches, and [applyEffects] carries them
+   * over to the new media — the player always mirrors the controls.
    *
    * @param mediaItems The list of media items to play.
    */
