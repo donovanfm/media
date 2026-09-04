@@ -39,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -165,12 +166,10 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * effect control funnels through here — the player always reflects what the controls show.
    */
   private inline fun updateAndApply(transform: (EffectUiState) -> EffectUiState) {
-    val oldState = _uiState.value
-    val newState = transform(oldState)
-    if (newState == oldState) {
+    val oldState = _uiState.getAndUpdate(transform)
+    if (_uiState.value == oldState) {
       return
     }
-    _uiState.value = newState
     applyEffects()
   }
 

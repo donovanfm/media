@@ -55,6 +55,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -258,9 +259,10 @@ class EffectActivity : ComponentActivity() {
             // Free text is committed on IME "done" or when focus leaves the field, rather than on
             // every keystroke: effects apply immediately on every state change, and rebuilding
             // the player's effects pipeline per character would be wasteful.
-            var text by remember(uiState.textOverlayText) {
-              mutableStateOf(uiState.textOverlayText ?: "")
-            }
+            var text by
+              rememberSaveable(uiState.textOverlayText) {
+                mutableStateOf(uiState.textOverlayText ?: "")
+              }
             val focusManager = LocalFocusManager.current
             OutlinedTextField(
               value = text,
