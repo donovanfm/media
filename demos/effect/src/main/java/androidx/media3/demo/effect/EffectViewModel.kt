@@ -26,6 +26,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
@@ -65,10 +66,25 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * when this ViewModel is cleared.
    */
   val exoPlayer: ExoPlayer by lazy {
-    ExoPlayer.Builder(application).build().apply { playWhenReady = true }
+    ExoPlayer.Builder(application).build().apply {
+      playWhenReady = true
+      addListener(
+        object : Player.Listener {
+          override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying && effectsPendingResume) {
+              effectsPendingResume = false
+              applyEffects()
+            }
+          }
+        }
+      )
+    }
   }
 
   private var lottieOverlayOptions: Map<String, Effect> = emptyMap()
+
+  /** Whether effect changes arrived while paused and still need applying on resume. */
+  private var effectsPendingResume = false
 
   init {
     loadPlaylists()
@@ -253,9 +269,17 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
 
   /**
    * Builds the video effects list based on the current [EffectUiState] and applies them to the
-   * underlying [ExoPlayer].
+   * underlying [ExoPlayer]. While playback is paused the change is deferred until it resumes.
    */
   private fun applyEffects() {
+    if (exoPlayer.playbackState == Player.STATE_READY && !exoPlayer.playWhenReady) {
+      // A paused player renders no new frames, so the change would not be visible until playback
+      // resumes anyway, and effect changes queued while paused can stall playback on resume.
+      // Redrawing the paused frame needs VideoFrameProcessor.REDRAW with the replayable frame
+      // cache, which ExoPlayer does not expose yet (b/391109644).
+      effectsPendingResume = true
+      return
+    }
     val currentState = _uiState.value
     val listBuilder = ImmutableList.builder<Effect>()
 
@@ -299,6 +323,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
 
     exoPlayer.apply {
       setVideoEffects(listBuilder.build())
+      // No-op unless the player is idle, so this only re-prepares after a playback error.
       prepare()
     }
   }
