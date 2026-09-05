@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import java.net.URI
 import java.security.MessageDigest
 
 plugins {
@@ -44,11 +45,18 @@ android {
   lint.disable += listOf("GoogleAppIndexingWarning", "MissingTranslation")
 
   buildFeatures { compose = true }
+}
 
-  // The MediaPipe segmentation model is downloaded at build time (see downloadSegmenterModel)
-  // rather than checked into the repository. Resolved to a plain File because the SourceSet API
-  // doesn't accept Provider instances; the task dependency is wired via preBuild below.
-  sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("downloadedAssets").get().asFile)
+// The MediaPipe segmentation model is downloaded at build time (see downloadSegmenterModel) rather
+// than checked into the repository. It is added as a static asset directory (not a generated one)
+// because the download task deliberately declares no outputs; the task dependency is wired via
+// preBuild below.
+androidComponents {
+  onVariants { variant ->
+    variant.sources.assets?.addStaticSourceDirectory(
+      layout.buildDirectory.dir("downloadedAssets").get().asFile.path
+    )
+  }
 }
 
 /**
@@ -61,78 +69,79 @@ android {
  * The download is skipped when Gradle runs with --offline or -PskipStickerModelDownload; the build
  * still succeeds and the app disables custom sticker creation when the asset is absent.
  */
-val downloadSegmenterModel by tasks.registering {
-  // The tasks-vision 1.0 InteractiveSegmenter requires the v2 .task bundle; the older
-  // magic_touch.tflite only works with InteractiveSegmenterLegacy.
-  val modelUrl =
-    "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task"
-  val modelSha256 = "38431bc66b883404e8397f74c3579404315b9b52b04a46c6346fe906a7309b03"
-  val outputFile = layout.buildDirectory.file("downloadedAssets/interactive_segmentation.task")
-  val skipRequested =
-    gradle.startParameter.isOffline ||
-      providers.gradleProperty("skipStickerModelDownload").isPresent
-  // Deliberately NOT registered as a task output: the model is a checksum-verified cache the
-  // task manages itself. Registering it would let Gradle's stale-output cleanup delete it
-  // whenever the task implementation changes, forcing a pointless 30MB re-download.
-  doLast {
-    fun sha256(file: File): String {
-      val digest = MessageDigest.getInstance("SHA-256")
-      file.inputStream().use { input ->
-        val buffer = ByteArray(64 * 1024)
-        while (true) {
-          val read = input.read(buffer)
-          if (read < 0) break
-          digest.update(buffer, 0, read)
+val downloadSegmenterModel =
+  tasks.register("downloadSegmenterModel") {
+    // The tasks-vision 1.0 InteractiveSegmenter requires the v2 .task bundle; the older
+    // magic_touch.tflite only works with InteractiveSegmenterLegacy.
+    val modelUrl =
+      "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task"
+    val modelSha256 = "38431bc66b883404e8397f74c3579404315b9b52b04a46c6346fe906a7309b03"
+    val outputFile = layout.buildDirectory.file("downloadedAssets/interactive_segmentation.task")
+    val skipRequested =
+      gradle.startParameter.isOffline ||
+        providers.gradleProperty("skipStickerModelDownload").isPresent
+    // Deliberately NOT registered as a task output: the model is a checksum-verified cache the
+    // task manages itself. Registering it would let Gradle's stale-output cleanup delete it
+    // whenever the task implementation changes, forcing a pointless 30MB re-download.
+    doLast {
+      fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+          val buffer = ByteArray(64 * 1024)
+          while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+          }
         }
+        return digest.digest().joinToString("") { "%02x".format(it) }
       }
-      return digest.digest().joinToString("") { "%02x".format(it) }
-    }
 
-    val target = outputFile.get().asFile
-    if (target.exists()) {
-      if (sha256(target) == modelSha256) {
+      val target = outputFile.get().asFile
+      if (target.exists()) {
+        if (sha256(target) == modelSha256) {
+          return@doLast
+        }
+        logger.warn("Cached segmentation model failed SHA-256 verification; re-downloading.")
+        target.delete()
+      }
+      if (skipRequested) {
+        logger.warn(
+          "Skipping segmentation model download (offline build or -PskipStickerModelDownload); " +
+            "custom sticker creation will be disabled in this build."
+        )
         return@doLast
       }
-      logger.warn("Cached segmentation model failed SHA-256 verification; re-downloading.")
-      target.delete()
-    }
-    if (skipRequested) {
-      logger.warn(
-        "Skipping segmentation model download (offline build or -PskipStickerModelDownload); " +
-          "custom sticker creation will be disabled in this build."
-      )
-      return@doLast
-    }
-    target.parentFile.mkdirs()
-    val tempFile = File(target.parentFile, target.name + ".part")
-    try {
-      uri(modelUrl).toURL().openStream().use { input ->
-        tempFile.outputStream().use { output -> input.copyTo(output) }
-      }
-      val actualSha256 = sha256(tempFile)
-      if (actualSha256 != modelSha256) {
+      target.parentFile.mkdirs()
+      val tempFile = File(target.parentFile, target.name + ".part")
+      try {
+        URI(modelUrl).toURL().openStream().use { input ->
+          tempFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        val actualSha256 = sha256(tempFile)
+        if (actualSha256 != modelSha256) {
+          throw GradleException(
+            "Downloaded segmentation model failed SHA-256 verification: expected $modelSha256, " +
+              "got $actualSha256."
+          )
+        }
+        if (!tempFile.renameTo(target)) {
+          throw GradleException("Could not move ${tempFile.path} to ${target.path}.")
+        }
+      } catch (e: Exception) {
+        tempFile.delete()
+        if (e is GradleException) {
+          throw e
+        }
         throw GradleException(
-          "Downloaded segmentation model failed SHA-256 verification: expected $modelSha256, " +
-            "got $actualSha256."
+          "Failed to download the MediaPipe segmentation model. If building offline, use " +
+            "-PskipStickerModelDownload (custom sticker creation will be disabled) or download " +
+            "$modelUrl manually and place it at ${target.path}.",
+          e,
         )
       }
-      if (!tempFile.renameTo(target)) {
-        throw GradleException("Could not move ${tempFile.path} to ${target.path}.")
-      }
-    } catch (e: Exception) {
-      tempFile.delete()
-      if (e is GradleException) {
-        throw e
-      }
-      throw GradleException(
-        "Failed to download the MediaPipe segmentation model. If building offline, use " +
-          "-PskipStickerModelDownload (custom sticker creation will be disabled) or download " +
-          "$modelUrl manually and place it at ${target.path}.",
-        e,
-      )
     }
   }
-}
 
 tasks.named("preBuild") { dependsOn(downloadSegmenterModel) }
 
