@@ -16,10 +16,15 @@
 package androidx.media3.demo.effect
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import androidx.annotation.OptIn
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.AndroidViewModel
@@ -28,13 +33,22 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
+import androidx.media3.demo.effect.sticker.SegmenterEngine
+import androidx.media3.demo.effect.sticker.StickerAnimation
+import androidx.media3.demo.effect.sticker.StickerAsset
+import androidx.media3.demo.effect.sticker.StickerRepository
+import androidx.media3.demo.effect.sticker.trimmedToOpaqueBounds
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
 import com.google.common.collect.ImmutableList
+import java.io.IOException
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -87,9 +101,36 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   /** Whether effect changes arrived while paused and still need applying on resume. */
   private var effectsPendingResume = false
 
+  private val stickerRepository = StickerRepository(application)
+
+  // Decoded sticker bitmaps keyed by StickerAsset.id; the asset list is published via
+  // EffectUiState while the heavyweight bitmaps stay here (same idiom as lottieOverlayOptions).
+  private var stickerBitmaps: Map<String, Bitmap> = emptyMap()
+
   init {
     loadPlaylists()
     loadLottieEffects()
+    loadStickerAssets()
+    checkStickerCreationAvailable()
+  }
+
+  /**
+   * Custom sticker creation needs the segmentation model, which builds made offline (or with
+   * -PskipStickerModelDownload) don't bundle; disable the entry point instead of failing later.
+   */
+  private fun checkStickerCreationAvailable() {
+    viewModelScope.launch {
+      val available =
+        withContext(Dispatchers.IO) {
+          try {
+            getApplication<Application>().assets.open(SegmenterEngine.MODEL_ASSET_PATH).use {}
+            true
+          } catch (e: IOException) {
+            false
+          }
+        }
+      _uiState.update { it.copy(stickerCreationAvailable = available) }
+    }
   }
 
   private fun loadPlaylists() {
@@ -145,9 +186,85 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the UI.
-   * The effect controls keep their values across media switches, and [applyEffects] carries them
-   * over to the new media — the player always mirrors the controls.
+   * Loads the sticker picker contents — bundled assets plus user-created stickers — and decodes
+   * their bitmaps off the main thread. When [selectId] is given (a freshly created sticker), it
+   * becomes the selected entry; [placeAfterLoad] additionally enters placement mode for it.
+   */
+  private fun loadStickerAssets(selectId: String? = null, placeAfterLoad: Boolean = false) {
+    viewModelScope.launch {
+      try {
+        val (assets, bitmaps) =
+          withContext(Dispatchers.IO) {
+            val resources = getApplication<Application>().resources
+            val names = resources.getStringArray(R.array.sticker_asset_names)
+            val paths = resources.getStringArray(R.array.sticker_asset_paths)
+            val bundled = names.indices.map { StickerAsset.Bundled(names[it], paths[it]) }
+            val custom = stickerRepository.loadAll()
+            val allAssets = bundled + custom
+            val bitmaps = buildMap {
+              for (asset in allAssets) {
+                when (asset) {
+                  // Bundled images and stickers saved before trimming existed may carry
+                  // transparent borders that keep their content off the video edges; trim at
+                  // load. Animated first frames must NOT be trimmed: their dimensions have to
+                  // match the saved animation frames or placement and playback disagree on size.
+                  is StickerAsset.Bundled ->
+                    getApplication<Application>().assets.open(asset.assetPath).use { stream ->
+                      BitmapFactory.decodeStream(stream)?.let {
+                        put(asset.id, it.trimmedToOpaqueBounds())
+                      }
+                    }
+                  is StickerAsset.Static ->
+                    put(asset.id, stickerRepository.loadBitmap(asset).trimmedToOpaqueBounds())
+                  is StickerAsset.Animated ->
+                    put(asset.id, stickerRepository.loadFirstFrame(asset))
+                }
+              }
+            }
+            allAssets.filter { bitmaps.containsKey(it.id) } to bitmaps
+          }
+        stickerBitmaps = bitmaps
+        _uiState.update {
+          it.copy(
+            stickerAssets = ImmutableList.copyOf(assets),
+            selectedStickerAssetId =
+              selectId?.takeIf { id -> bitmaps.containsKey(id) }
+                ?: it.selectedStickerAssetId?.takeIf { id -> bitmaps.containsKey(id) }
+                ?: assets.firstOrNull()?.id,
+            stickerAssetsLoaded = assets.isNotEmpty(),
+          )
+        }
+        if (placeAfterLoad && _uiState.value.selectedStickerAssetId == selectId) {
+          startStickerPlacement()
+        }
+      } catch (e: IOException) {
+        _uiState.update {
+          it.copy(
+            errorMessage = getApplication<Application>().getString(R.string.sticker_loading_error)
+          )
+        }
+      }
+    }
+  }
+
+  /**
+   * Reloads the sticker list after a sticker was created, then drops the new sticker straight
+   * into placement mode — creating a sticker almost always means wanting it on the video, so the
+   * flow skips the manual Place step.
+   */
+  fun onStickerCreated(stickerId: String) {
+    loadStickerAssets(selectId = stickerId, placeAfterLoad = true)
+  }
+
+  /** The URI of the currently playing media item, used as the sticker creation source video. */
+  fun currentMediaUri(): Uri? = exoPlayer.currentMediaItem?.localConfiguration?.uri
+
+  /**
+   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the
+   * UI. The effect controls keep their values across media switches, and [applyEffects] carries
+   * them over to the new media — the player always mirrors the controls. Placed stickers are the
+   * exception: they snapshot the previous video's content rect and pixel size, so they can't be
+   * carried to different media meaningfully and are cleared (as is any placement in progress).
    *
    * @param mediaItems The list of media items to play.
    */
@@ -156,14 +273,22 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
       setMediaItems(mediaItems)
       prepare()
     }
-    _uiState.update { it.copy(effectsEnabled = true) }
+    _uiState.update {
+      it.copy(
+        effectsEnabled = true,
+        placedStickers = ImmutableList.of(),
+        stickerPlacement = StickerPlacement.Inactive,
+      )
+    }
     applyEffects()
   }
 
   /**
    * Applies [transform] to the UI state and immediately re-applies the video effects, unless the
    * state is unchanged (which avoids needlessly rebuilding the player's effects pipeline). Every
-   * effect control funnels through here — the player always reflects what the controls show.
+   * control that changes what renders in the video funnels through here — the player always
+   * reflects what the controls show. UI-only state (selections, placement previews, layout
+   * sizes) uses a plain state update instead, since it doesn't affect the player.
    */
   private inline fun updateAndApply(transform: (EffectUiState) -> EffectUiState) {
     val oldState = _uiState.getAndUpdate(transform)
@@ -267,7 +392,260 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Builds the video effects list based on the current [EffectUiState] and applies them to the
+   * Toggles whether placed sticker overlays are included in the applied effects.
+   *
+   * @param checked Whether the sticker overlay checkbox is checked.
+   */
+  fun updateStickerChecked(checked: Boolean) {
+    updateAndApply { it.copy(stickerOverlayChecked = checked) }
+  }
+
+  /**
+   * Updates the selected sticker asset in the UI controls. Selection alone doesn't change the
+   * applied effects; it only chooses what the next placement uses.
+   *
+   * @param id The [StickerAsset.id] of the sticker asset.
+   */
+  fun updateSelectedStickerAsset(id: String) {
+    _uiState.update { it.copy(selectedStickerAssetId = id) }
+  }
+
+  /**
+   * Updates the preset placement animation. When a sticker is currently being placed, the change
+   * applies to it live (so choosing a preset after auto-placement works as expected); recorded
+   * stickers keep [StickerAnimation.NONE] since they play their own animation.
+   *
+   * @param animation The preset to use.
+   */
+  fun updateSelectedStickerAnimation(animation: StickerAnimation) {
+    _uiState.update {
+      val placement = it.stickerPlacement
+      it.copy(
+        selectedStickerAnimation = animation,
+        stickerPlacement =
+          if (placement is StickerPlacement.Placing && placement.animated == null) {
+            placement.copy(animation = animation)
+          } else {
+            placement
+          },
+      )
+    }
+  }
+
+  /**
+   * Records the measured size of the player box so placement can compute the video content rect.
+   *
+   * @param size The size of the player box in pixels.
+   */
+  fun updatePlayerBoxSize(size: Size) {
+    _uiState.update { it.copy(playerBoxSize = size) }
+  }
+
+  /**
+   * Enters placement mode for the currently selected sticker asset: pauses playback and shows a
+   * draggable preview centered over the video. Animated stickers load their frames first (on IO);
+   * the placement preview uses the first frame either way.
+   */
+  fun startStickerPlacement() {
+    val currentState = _uiState.value
+    if (currentState.stickerPlacement is StickerPlacement.Placing) {
+      return
+    }
+    val assetId = currentState.selectedStickerAssetId ?: return
+    val asset = currentState.stickerAssets.find { it.id == assetId } ?: return
+    val bitmap = stickerBitmaps[assetId] ?: return
+    viewModelScope.launch {
+      val animated =
+        if (asset is StickerAsset.Animated) {
+          try {
+            stickerRepository.loadAnimated(asset)
+          } catch (e: IOException) {
+            _uiState.update {
+              it.copy(
+                errorMessage =
+                  getApplication<Application>().getString(R.string.sticker_loading_error)
+              )
+            }
+            return@launch
+          }
+        } else {
+          null
+        }
+      if (_uiState.value.stickerPlacement is StickerPlacement.Placing) {
+        return@launch
+      }
+      exoPlayer.pause()
+      val videoSize = exoPlayer.videoSize
+      val contentRect =
+        StickerGeometry.videoContentRect(
+          _uiState.value.playerBoxSize,
+          videoSize.width,
+          videoSize.height,
+          videoSize.pixelWidthHeightRatio,
+        )
+      _uiState.update {
+        it.copy(
+          stickerPlacement =
+            StickerPlacement.Placing(
+              original = null,
+              assetName = asset.name,
+              bitmap = bitmap,
+              transform =
+                StickerGeometry.centeredTransform(bitmap.width, bitmap.height, contentRect.size),
+              contentRect = contentRect,
+              videoPixelWidth = videoSize.width,
+              animated = animated,
+              // Recorded stickers bring their own animation; the preset dropdown is disabled for
+              // them in the UI, and NONE here keeps behavior consistent with that promise.
+              animation =
+                if (animated != null) {
+                  StickerAnimation.NONE
+                } else {
+                  _uiState.value.selectedStickerAnimation
+                },
+            )
+        )
+      }
+    }
+  }
+
+  /**
+   * Re-enters placement mode for a committed sticker, restoring its transform so it can be moved,
+   * rescaled, or cancelled back to its original position.
+   *
+   * @param id The [PlacedSticker.id] of the sticker to edit.
+   */
+  fun editPlacedSticker(id: UUID) {
+    val currentState = _uiState.value
+    if (currentState.stickerPlacement is StickerPlacement.Placing) {
+      return
+    }
+    val sticker = currentState.placedStickers.find { it.id == id } ?: return
+    exoPlayer.pause()
+    // Removing the sticker from the placed list re-applies the effects without it: otherwise its
+    // previously applied copy stays baked into the video next to the draggable preview, which
+    // reads as a duplicate.
+    updateAndApply {
+      it.copy(
+        placedStickers =
+          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id }),
+        stickerPlacement =
+          StickerPlacement.Placing(
+            original = sticker,
+            assetName = sticker.assetName,
+            bitmap = sticker.bitmap,
+            transform = sticker.transform,
+            contentRect = sticker.contentRect,
+            videoPixelWidth = sticker.videoPixelWidth,
+            animated = sticker.animated,
+            animation = sticker.animation,
+          ),
+        // Reflect the edited sticker's preset in the Animation dropdown.
+        selectedStickerAnimation = sticker.animation,
+      )
+    }
+  }
+
+  /**
+   * Applies one pan+zoom gesture event to the sticker being placed. Pan and zoom from the same
+   * pointer event are applied atomically so clamping stays consistent.
+   */
+  fun transformSticker(centroid: Offset, pan: Offset, zoom: Float) {
+    _uiState.update {
+      val placing = it.stickerPlacement as? StickerPlacement.Placing ?: return@update it
+      it.copy(
+        stickerPlacement =
+          placing.copy(
+            transform =
+              StickerGeometry.applyGesture(
+                placing.transform,
+                centroid,
+                pan,
+                zoom,
+                placing.bitmap.width,
+                placing.bitmap.height,
+                placing.contentRect.size,
+              )
+          )
+      )
+    }
+  }
+
+  /**
+   * Commits the sticker being placed, enables the sticker overlay effect (which applies it to the
+   * video), and resumes playback.
+   */
+  fun commitStickerPlacement() {
+    val placing = _uiState.value.stickerPlacement as? StickerPlacement.Placing ?: return
+    val placedSticker =
+      PlacedSticker(
+        id = placing.original?.id ?: UUID.randomUUID(),
+        assetName = placing.assetName,
+        bitmap = placing.bitmap,
+        transform = placing.transform,
+        contentRect = placing.contentRect,
+        videoPixelWidth = placing.videoPixelWidth,
+        animated = placing.animated,
+        animation = placing.animation,
+      )
+    updateAndApply {
+      it.copy(
+        placedStickers =
+          ImmutableList.builder<PlacedSticker>().addAll(it.placedStickers).add(placedSticker)
+            .build(),
+        stickerPlacement = StickerPlacement.Inactive,
+        stickerOverlayChecked = true,
+      )
+    }
+    exoPlayer.play()
+  }
+
+  /**
+   * Exits placement mode without committing. When editing an existing sticker, restores it
+   * unchanged.
+   */
+  fun cancelStickerPlacement() {
+    val placing = _uiState.value.stickerPlacement as? StickerPlacement.Placing ?: return
+    if (placing.original != null) {
+      // Editing un-applied the original when placement began; bring it back on screen.
+      updateAndApply {
+        it.copy(
+          placedStickers =
+            ImmutableList.builder<PlacedSticker>()
+              .addAll(it.placedStickers)
+              .add(placing.original)
+              .build(),
+          stickerPlacement = StickerPlacement.Inactive,
+        )
+      }
+    } else {
+      // Nothing was applied yet; leaving placement mode is a UI-only change.
+      _uiState.update { it.copy(stickerPlacement = StickerPlacement.Inactive) }
+    }
+    exoPlayer.play()
+  }
+
+  /**
+   * Removes a committed sticker from the video.
+   *
+   * @param id The [PlacedSticker.id] of the sticker to remove.
+   */
+  fun removePlacedSticker(id: UUID) {
+    if (_uiState.value.stickerPlacement is StickerPlacement.Placing) {
+      // Deleting mid-placement would fight the placement state; the row is disabled in the UI
+      // too, this is belt-and-braces.
+      return
+    }
+    updateAndApply {
+      it.copy(
+        placedStickers =
+          ImmutableList.copyOf(it.placedStickers.filter { placed -> placed.id != id })
+      )
+    }
+  }
+
+  /**
+   * Builds the video effects list from the current [EffectUiState] and applies it to the
    * underlying [ExoPlayer]. While playback is paused the change is deferred until it resumes.
    */
   private fun applyEffects() {
@@ -315,6 +693,51 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
         TextOverlay.createStaticTextOverlay(spannableOverlayText, staticOverlaySettings)
       )
     }
+    // Stickers are added last so they composite on top of the other texture overlays.
+    if (currentState.stickerOverlayChecked) {
+      for (sticker in currentState.placedStickers) {
+        val placement =
+          StickerGeometry.toOverlayPlacement(
+            sticker.transform,
+            sticker.bitmap.width,
+            sticker.bitmap.height,
+            sticker.contentRect.size,
+            sticker.videoPixelWidth,
+          )
+        val animated = sticker.animated
+        overlaysBuilder.add(
+          when {
+            animated != null ->
+              AnimatedStickerOverlay(
+                animated.frames,
+                animated.timestampsUs,
+                animated.durationUs,
+                sticker.animation,
+                placement.anchorX,
+                placement.anchorY,
+                placement.scale,
+              )
+            sticker.animation != StickerAnimation.NONE ->
+              AnimatedStickerOverlay.forStaticBitmap(
+                sticker.bitmap,
+                sticker.animation,
+                placement.anchorX,
+                placement.anchorY,
+                placement.scale,
+              )
+            else ->
+              BitmapOverlay.createStaticBitmapOverlay(
+                sticker.bitmap,
+                StaticOverlaySettings.Builder()
+                  .setBackgroundFrameAnchor(placement.anchorX, placement.anchorY)
+                  .setScale(placement.scale, placement.scale)
+                  .build(),
+              )
+          }
+        )
+      }
+    }
+
     val overlays = overlaysBuilder.build()
     if (overlays.isNotEmpty()) {
       listBuilder.add(OverlayEffect(overlays))
