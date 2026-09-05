@@ -146,7 +146,6 @@ val downloadSegmenterModel by
 tasks.named("preBuild") { dependsOn(downloadSegmenterModel) }
 
 dependencies {
-  implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.activity.compose)
   implementation(libs.material)
 
