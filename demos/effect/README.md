@@ -21,8 +21,8 @@ this demo.
 
 ## Notes
 
-* This demo requires `minSdk` 24 (the rest of the repository builds against
-  23) because of the MediaPipe `tasks-vision` dependency.
+* This demo builds against `minSdk` 24, which the MediaPipe `tasks-vision`
+  dependency also requires.
 * The MediaPipe interactive segmentation model bundle
   (`interactive_segmentation.task`, ~30 MB) is downloaded automatically on
   first build by the `downloadSegmenterModel` Gradle task, verified against a
