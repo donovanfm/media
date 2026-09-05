@@ -35,12 +35,12 @@ import kotlinx.coroutines.withContext
  * Persistence for user-created stickers.
  *
  * Stickers live in app-private storage (`filesDir/stickers/`), never in MediaStore: a demo
- * shouldn't pollute the device gallery, and app-private files work identically across all
- * supported API levels. Each static sticker is a PNG (lossless, alpha-capable) plus a small JSON
- * sidecar holding the user-visible name. Each animated sticker is a directory of WebP frames
- * (alpha-capable and much smaller than PNG across dozens of frames) plus a `manifest.json` with
- * the frame timeline — Android has no framework encoder for single-file animated WebP, so frames
- * plus a manifest is the pragmatic format.
+ * shouldn't pollute the device gallery, and app-private files work identically across all supported
+ * API levels. Each static sticker is a PNG (lossless, alpha-capable) plus a small JSON sidecar
+ * holding the user-visible name. Each animated sticker is a directory of WebP frames (alpha-capable
+ * and much smaller than PNG across dozens of frames) plus a `manifest.json` with the frame timeline
+ * — Android has no framework encoder for single-file animated WebP, so frames plus a manifest is
+ * the pragmatic format.
  *
  * All methods are suspending and do their IO on [ioDispatcher].
  */
@@ -54,8 +54,8 @@ internal class StickerRepository(
 
   /**
    * Saves [sticker] as a new static sticker named [name] and returns its asset. The sticker is
-   * trimmed to its non-transparent bounds first so its visible content can be placed flush
-   * against the video edges.
+   * trimmed to its non-transparent bounds first so its visible content can be placed flush against
+   * the video edges.
    */
   suspend fun saveStatic(sticker: Bitmap, name: String): StickerAsset.Static {
     return withContext(ioDispatcher) {
@@ -81,9 +81,9 @@ internal class StickerRepository(
 
   /**
    * Saves a composed animation as a new animated sticker named [name]: one WebP per frame plus a
-   * manifest, written into a temp directory and renamed into place so partial writes never
-   * surface as broken stickers. The animation is trimmed to the union of its frames'
-   * non-transparent bounds first (a uniform crop, so frame size stays constant).
+   * manifest, written into a temp directory and renamed into place so partial writes never surface
+   * as broken stickers. The animation is trimmed to the union of its frames' non-transparent bounds
+   * first (a uniform crop, so frame size stays constant).
    */
   suspend fun saveAnimated(
     animation: StickerFrameRecorder.ComposedAnimation,

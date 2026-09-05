@@ -33,16 +33,16 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.Contrast
-import androidx.media3.effect.OverlayEffect
-import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.demo.effect.sticker.AnimatedStickerOverlay
 import androidx.media3.demo.effect.sticker.SegmenterEngine
 import androidx.media3.demo.effect.sticker.StickerAnimation
 import androidx.media3.demo.effect.sticker.StickerAsset
 import androidx.media3.demo.effect.sticker.StickerRepository
 import androidx.media3.demo.effect.sticker.trimmedToOpaqueBounds
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.Contrast
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
@@ -216,8 +216,7 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
                     }
                   is StickerAsset.Static ->
                     put(asset.id, stickerRepository.loadBitmap(asset).trimmedToOpaqueBounds())
-                  is StickerAsset.Animated ->
-                    put(asset.id, stickerRepository.loadFirstFrame(asset))
+                  is StickerAsset.Animated -> put(asset.id, stickerRepository.loadFirstFrame(asset))
                 }
               }
             }
@@ -248,9 +247,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Reloads the sticker list after a sticker was created, then drops the new sticker straight
-   * into placement mode — creating a sticker almost always means wanting it on the video, so the
-   * flow skips the manual Place step.
+   * Reloads the sticker list after a sticker was created, then drops the new sticker straight into
+   * placement mode — creating a sticker almost always means wanting it on the video, so the flow
+   * skips the manual Place step.
    */
   fun onStickerCreated(stickerId: String) {
     loadStickerAssets(selectId = stickerId, placeAfterLoad = true)
@@ -260,9 +259,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   fun currentMediaUri(): Uri? = exoPlayer.currentMediaItem?.localConfiguration?.uri
 
   /**
-   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the
-   * UI. The effect controls keep their values across media switches, and [applyEffects] carries
-   * them over to the new media — the player always mirrors the controls. Placed stickers are the
+   * Updates the player with a new list of [MediaItem]s to play, enabling effect controls in the UI.
+   * The effect controls keep their values across media switches, and [applyEffects] carries them
+   * over to the new media — the player always mirrors the controls. Placed stickers are the
    * exception: they snapshot the previous video's content rect and pixel size, so they can't be
    * carried to different media meaningfully and are cleared (as is any placement in progress).
    *
@@ -287,8 +286,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
    * Applies [transform] to the UI state and immediately re-applies the video effects, unless the
    * state is unchanged (which avoids needlessly rebuilding the player's effects pipeline). Every
    * control that changes what renders in the video funnels through here — the player always
-   * reflects what the controls show. UI-only state (selections, placement previews, layout
-   * sizes) uses a plain state update instead, since it doesn't affect the player.
+   * reflects what the controls show. UI-only state (selections, placement previews, layout sizes)
+   * uses a plain state update instead, since it doesn't affect the player.
    */
   private inline fun updateAndApply(transform: (EffectUiState) -> EffectUiState) {
     val oldState = _uiState.getAndUpdate(transform)
@@ -591,7 +590,9 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
     updateAndApply {
       it.copy(
         placedStickers =
-          ImmutableList.builder<PlacedSticker>().addAll(it.placedStickers).add(placedSticker)
+          ImmutableList.builder<PlacedSticker>()
+            .addAll(it.placedStickers)
+            .add(placedSticker)
             .build(),
         stickerPlacement = StickerPlacement.Inactive,
         stickerOverlayChecked = true,
@@ -645,8 +646,8 @@ internal class EffectViewModel(application: Application) : AndroidViewModel(appl
   }
 
   /**
-   * Builds the video effects list from the current [EffectUiState] and applies it to the
-   * underlying [ExoPlayer]. While playback is paused the change is deferred until it resumes.
+   * Builds the video effects list from the current [EffectUiState] and applies it to the underlying
+   * [ExoPlayer]. While playback is paused the change is deferred until it resumes.
    */
   private fun applyEffects() {
     if (exoPlayer.playbackState == Player.STATE_READY && !exoPlayer.playWhenReady) {

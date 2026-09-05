@@ -25,10 +25,10 @@ import androidx.media3.effect.StaticOverlaySettings
 import com.google.common.collect.ImmutableList
 
 /**
- * A [BitmapOverlay] that animates a placed sticker in either or both of two ways: swapping
- * recorded bitmap frames over time (looping via [FrameTimeline]) and modulating the overlay
- * settings with a [StickerAnimation] preset (rotation/scale/anchor per presentation time, at zero
- * texture-upload cost).
+ * A [BitmapOverlay] that animates a placed sticker in either or both of two ways: swapping recorded
+ * bitmap frames over time (looping via [FrameTimeline]) and modulating the overlay settings with a
+ * [StickerAnimation] preset (rotation/scale/anchor per presentation time, at zero texture-upload
+ * cost).
  *
  * The first call baselines the video's presentation time, so animations start at their beginning
  * wherever playback begins; [FrameTimeline] and [modulationAt] both handle wraparound including

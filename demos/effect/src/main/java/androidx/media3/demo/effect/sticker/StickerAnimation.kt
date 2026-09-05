@@ -22,10 +22,10 @@ import kotlin.math.sin
  * Preset placement animations for stickers.
  *
  * Unlike recorded animated stickers (which swap bitmap frames over time), these animate the
- * overlay's [androidx.media3.common.OverlaySettings] — rotation, scale, and anchor position —
- * while the texture stays constant. That makes them free at render time (no per-frame texture
- * uploads) and perfectly smooth at any video frame rate. The modulation math is pure and
- * unit-testable; the overlay class assembles it into settings.
+ * overlay's [androidx.media3.common.OverlaySettings] — rotation, scale, and anchor position — while
+ * the texture stays constant. That makes them free at render time (no per-frame texture uploads)
+ * and perfectly smooth at any video frame rate. The modulation math is pure and unit-testable; the
+ * overlay class assembles it into settings.
  */
 internal enum class StickerAnimation {
   /** No preset animation; the sticker renders at its placed position. */
@@ -68,8 +68,7 @@ internal fun StickerAnimation.modulationAt(elapsedUs: Long): AnimationModulation
       )
     StickerAnimation.PULSE ->
       AnimationModulation(
-        scaleFactor =
-          1f + PULSE_AMPLITUDE * sin(2.0 * PI * elapsedUs / PULSE_PERIOD_US).toFloat()
+        scaleFactor = 1f + PULSE_AMPLITUDE * sin(2.0 * PI * elapsedUs / PULSE_PERIOD_US).toFloat()
       )
     StickerAnimation.INTENSIFY -> {
       // A new deterministic pseudo-random offset every bucket: hashing the bucket index keeps the

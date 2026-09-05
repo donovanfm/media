@@ -54,10 +54,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * ViewModel for the sticker creation screen.
  *
  * Owns the screen's short-lived [ExoPlayer] (separate from the main screen's player so captured
- * frames are free of applied effects), the [SegmenterEngine], and the [StickerRepository]. All
- * work runs in [viewModelScope] with UI state written only from the main dispatcher; frames are
- * captured on the main thread through a UI-provided [FrameSource] so the ViewModel never touches
- * views.
+ * frames are free of applied effects), the [SegmenterEngine], and the [StickerRepository]. All work
+ * runs in [viewModelScope] with UI state written only from the main dispatcher; frames are captured
+ * on the main thread through a UI-provided [FrameSource] so the ViewModel never touches views.
  */
 @OptIn(UnstableApi::class)
 internal class StickerCreationViewModel(application: Application) : AndroidViewModel(application) {
@@ -215,8 +214,8 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   }
 
   /**
-   * Cuts a static sticker: segments the object at [point] in the current source — a photo, or
-   * the current video frame (pausing playback) — and shows the mask preview.
+   * Cuts a static sticker: segments the object at [point] in the current source — a photo, or the
+   * current video frame (pausing playback) — and shows the mask preview.
    */
   fun createStaticSticker(point: NormalizedPoint) {
     val currentState = _uiState.value
@@ -276,9 +275,9 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
    * sampled every [CAPTURE_INTERVAL_MS] together with the finger's position and a timestamp — so
    * the recording gesture stays smooth no matter how slow segmentation is on the device. When the
    * finger lifts ([stopRecording]) or a capacity cap is hit, the stored frames are segmented as a
-   * batch behind a progress indicator ([processRecordedFrames]). Real capture timestamps ride
-   * along with each frame, so playback timing is unaffected by either the sampling interval or
-   * inference speed.
+   * batch behind a progress indicator ([processRecordedFrames]). Real capture timestamps ride along
+   * with each frame, so playback timing is unaffected by either the sampling interval or inference
+   * speed.
    */
   fun startRecording(point: NormalizedPoint) {
     val currentState = _uiState.value
@@ -290,33 +289,32 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
       return
     }
     latestPoint = point
-    captureJob =
-      viewModelScope.launch {
-        val recordedFrames = mutableListOf<RecordedFrame>()
-        val startTimeNs = SystemClock.elapsedRealtimeNanos()
-        _uiState.update { it.copy(phase = CreationPhase.Recording(0)) }
-        while (isActive && recordedFrames.size < MAX_RECORDED_FRAMES) {
-          val fingerPoint = latestPoint ?: break
-          // Every frame needs its own bitmap (no reuse): all of them stay alive until the
-          // processing pass has segmented them. They are left to the GC afterwards — recycling
-          // explicitly would race an abandoned segmentation still reading a frame natively.
-          val frame = frameSource?.captureFrame(null) ?: break
-          val timestampUs = (SystemClock.elapsedRealtimeNanos() - startTimeNs) / 1000
-          recordedFrames += RecordedFrame(frame, fingerPoint, timestampUs)
-          _uiState.update { it.copy(phase = CreationPhase.Recording(recordedFrames.size)) }
-          delay(CAPTURE_INTERVAL_MS)
-        }
-        player.pause()
-        processRecordedFrames(recordedFrames)
+    captureJob = viewModelScope.launch {
+      val recordedFrames = mutableListOf<RecordedFrame>()
+      val startTimeNs = SystemClock.elapsedRealtimeNanos()
+      _uiState.update { it.copy(phase = CreationPhase.Recording(0)) }
+      while (isActive && recordedFrames.size < MAX_RECORDED_FRAMES) {
+        val fingerPoint = latestPoint ?: break
+        // Every frame needs its own bitmap (no reuse): all of them stay alive until the
+        // processing pass has segmented them. They are left to the GC afterwards — recycling
+        // explicitly would race an abandoned segmentation still reading a frame natively.
+        val frame = frameSource?.captureFrame(null) ?: break
+        val timestampUs = (SystemClock.elapsedRealtimeNanos() - startTimeNs) / 1000
+        recordedFrames += RecordedFrame(frame, fingerPoint, timestampUs)
+        _uiState.update { it.copy(phase = CreationPhase.Recording(recordedFrames.size)) }
+        delay(CAPTURE_INTERVAL_MS)
       }
+      player.pause()
+      processRecordedFrames(recordedFrames)
+    }
   }
 
   /**
    * Segments the recorded frames into an animation, updating [CreationPhase.Processing] progress
-   * along the way. A failed or timed-out segmentation stops the pass but keeps the frames
-   * processed so far — better a short sticker than a discarded one. The timeout also protects
-   * the UI from a wedged native call (segment() abandons the wait; the engine thread keeps
-   * running the call in the background).
+   * along the way. A failed or timed-out segmentation stops the pass but keeps the frames processed
+   * so far — better a short sticker than a discarded one. The timeout also protects the UI from a
+   * wedged native call (segment() abandons the wait; the engine thread keeps running the call in
+   * the background).
    */
   private suspend fun processRecordedFrames(recordedFrames: List<RecordedFrame>) {
     val recorder = StickerFrameRecorder()
@@ -347,8 +345,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
         framePixels?.takeIf { it.size == frame.width * frame.height }
           ?: IntArray(frame.width * frame.height).also { framePixels = it }
       withContext(Dispatchers.Default) {
-        val alphaMask =
-          SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
+        val alphaMask = SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
         frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
         recorder.addFrame(pixels, frame.width, alphaMask, recorded.timestampUs)
       }
@@ -408,8 +405,7 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     viewModelScope.launch {
       _uiState.update { it.copy(phase = CreationPhase.Saving) }
       try {
-        val name =
-          _uiState.value.stickerName.ifBlank { getString(R.string.sticker_default_name) }
+        val name = _uiState.value.stickerName.ifBlank { getString(R.string.sticker_default_name) }
         val asset =
           if (animation != null) {
             repository.saveAnimated(animation, name)
@@ -502,23 +498,21 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
 
   /** Converts a composed animation's pixel arrays into bitmaps for the preview UI. */
   private fun StickerFrameRecorder.ComposedAnimation.toAnimatedSticker(): AnimatedSticker {
-    val bitmaps =
-      frames.map { pixels ->
-        createBitmap(width, height).apply { setPixels(pixels, 0, width, 0, 0, width, height) }
-      }
+    val bitmaps = frames.map { pixels ->
+      createBitmap(width, height).apply { setPixels(pixels, 0, width, 0, 0, width, height) }
+    }
     return AnimatedSticker(bitmaps, timestampsUs, durationUs)
   }
 
   /**
-   * Converts the confidence mask into (mask preview at frame size, cutout bitmap), or null when
-   * the mask selected nothing. Runs on a background dispatcher.
+   * Converts the confidence mask into (mask preview at frame size, cutout bitmap), or null when the
+   * mask selected nothing. Runs on a background dispatcher.
    */
   private fun buildPreview(
     frame: Bitmap,
     mask: SegmenterEngine.ConfidenceMask,
   ): Pair<Bitmap, Bitmap>? {
-    val alphaMask =
-      SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
+    val alphaMask = SegmentationMaskProcessor.toAlphaMask(mask.values, mask.width, mask.height)
     if (alphaMask.bbox == null || mask.width != frame.width || mask.height != frame.height) {
       // A mask sized differently from the frame can't be cut out; treat it like an empty result.
       if (mask.width != frame.width || mask.height != frame.height) {
@@ -527,12 +521,29 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
     }
     val framePixels = IntArray(frame.width * frame.height)
     frame.getPixels(framePixels, 0, frame.width, 0, 0, frame.width, frame.height)
-    val cutout = SegmentationMaskProcessor.cutout(framePixels, frame.width, alphaMask) ?: return null
+    val cutout =
+      SegmentationMaskProcessor.cutout(framePixels, frame.width, alphaMask) ?: return null
     val previewPixels = SegmentationMaskProcessor.toPreviewPixels(alphaMask)
     val previewBitmap = createBitmap(alphaMask.width, alphaMask.height)
-    previewBitmap.setPixels(previewPixels, 0, alphaMask.width, 0, 0, alphaMask.width, alphaMask.height)
+    previewBitmap.setPixels(
+      previewPixels,
+      0,
+      alphaMask.width,
+      0,
+      0,
+      alphaMask.width,
+      alphaMask.height,
+    )
     val cutoutBitmap = createBitmap(cutout.bbox.width, cutout.bbox.height)
-    cutoutBitmap.setPixels(cutout.pixels, 0, cutout.bbox.width, 0, 0, cutout.bbox.width, cutout.bbox.height)
+    cutoutBitmap.setPixels(
+      cutout.pixels,
+      0,
+      cutout.bbox.width,
+      0,
+      0,
+      cutout.bbox.width,
+      cutout.bbox.height,
+    )
     return previewBitmap to cutoutBitmap
   }
 
@@ -548,8 +559,10 @@ internal class StickerCreationViewModel(application: Application) : AndroidViewM
   companion object {
     private const val TAG = "StickerCreation"
 
-    /** Long-edge cap for captured frames, matching the model's 512px input so per-frame resizes
-     * and pixel copies don't pay for resolution segmentation can't use. */
+    /**
+     * Long-edge cap for captured frames, matching the model's 512px input so per-frame resizes and
+     * pixel copies don't pay for resolution segmentation can't use.
+     */
     const val CAPTURE_MAX_DIMENSION = 512
 
     /** Watchdog for a single segmentation; generous even for cold-start CPU inference. */

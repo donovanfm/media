@@ -18,9 +18,9 @@ package androidx.media3.demo.effect.sticker
 /**
  * Maps touch positions on an aspect-fit video view to normalized video coordinates.
  *
- * The sticker creation screen renders video fit-center inside its view, so a touch may land on
- * the letterbox/pillarbox bars rather than the video. MediaPipe's segmenter expects a normalized
- * [0, 1] point in video space; this does that conversion and rejects taps on the bars. Pure math,
+ * The sticker creation screen renders video fit-center inside its view, so a touch may land on the
+ * letterbox/pillarbox bars rather than the video. MediaPipe's segmenter expects a normalized [0, 1]
+ * point in video space; this does that conversion and rejects taps on the bars. Pure math,
  * unit-testable on the JVM.
  */
 internal object VideoCoordinateMapper {
@@ -30,9 +30,9 @@ internal object VideoCoordinateMapper {
 
   /**
    * Converts a tap at ([tapX], [tapY]) in view coordinates to normalized video coordinates for a
-   * fit-center video of [videoWidth] x [videoHeight] display pixels shown in a view of
-   * [viewWidth] x [viewHeight]. Returns null when the tap lands outside the displayed video or
-   * when any dimension is unknown.
+   * fit-center video of [videoWidth] x [videoHeight] display pixels shown in a view of [viewWidth]
+   * x [viewHeight]. Returns null when the tap lands outside the displayed video or when any
+   * dimension is unknown.
    */
   fun viewToNormalizedVideo(
     viewWidth: Float,

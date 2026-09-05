@@ -33,7 +33,12 @@ class StickerFrameRecorderTest {
     IntArray(frameWidth * frameHeight) { (0xFF shl 24) or color }
 
   /** A full-confidence mask covering exactly [left]..[right] x [top]..[bottom]. */
-  private fun mask(left: Int, top: Int, right: Int, bottom: Int): SegmentationMaskProcessor.AlphaMask {
+  private fun mask(
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
+  ): SegmentationMaskProcessor.AlphaMask {
     val confidence = FloatArray(frameWidth * frameHeight)
     for (y in top..bottom) {
       for (x in left..right) {

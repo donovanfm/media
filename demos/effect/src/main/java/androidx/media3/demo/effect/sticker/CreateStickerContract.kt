@@ -24,8 +24,8 @@ import androidx.activity.result.contract.ActivityResultContract
 /**
  * Typed contract for launching [StickerCreationActivity].
  *
- * Input: the video to cut a sticker from, or null to let the user pick one on the creation
- * screen. Output: the saved sticker's [StickerAsset.id], or null when the user cancelled.
+ * Input: the video to cut a sticker from, or null to let the user pick one on the creation screen.
+ * Output: the saved sticker's [StickerAsset.id], or null when the user cancelled.
  */
 internal class CreateStickerContract : ActivityResultContract<Uri?, String?>() {
 

@@ -23,8 +23,8 @@ import androidx.compose.ui.geometry.Size
  * Pure geometry for sticker overlay placement.
  *
  * Placement happens in two coordinate spaces: the UI space of the video content rect (the
- * letterboxed area of the player box that actually shows video), where the user drags and pinches
- * a preview image, and the normalized [-1, 1] space of [androidx.media3.common.OverlaySettings]
+ * letterboxed area of the player box that actually shows video), where the user drags and pinches a
+ * preview image, and the normalized [-1, 1] space of [androidx.media3.common.OverlaySettings]
  * background frame anchors, where the committed overlay is rendered by the effect pipeline. This
  * file owns all conversions between the two, plus gesture application and clamping, so that the
  * math is unit-testable without any Android or media3 dependencies.
@@ -96,9 +96,8 @@ internal object StickerGeometry {
    *
    * The scale is clamped to [MIN_SCALE] and to the largest scale at which the sticker still fits
    * inside [bounds] (capped at [MAX_SCALE]); the resulting center is clamped so the scaled sticker
-   * stays fully inside [bounds]. Applying scale and offset in a single step avoids the
-   * inconsistent double-clamping that occurs when pan and zoom are handled as separate state
-   * updates.
+   * stays fully inside [bounds]. Applying scale and offset in a single step avoids the inconsistent
+   * double-clamping that occurs when pan and zoom are handled as separate state updates.
    */
   fun applyGesture(
     current: StickerTransform,
@@ -134,8 +133,8 @@ internal object StickerGeometry {
    * (OverlaySettings anchors are center-origin, Y-up). The returned scale converts the UI scale
    * into video-pixel space (`uiScale * videoPixelWidth / bounds.width`) so the rendered sticker
    * size matches the preview; when the video resolution is unknown ([videoPixelWidth] <= 0) it
-   * falls back to the raw UI scale. Anisotropic pixel aspect ratios are ignored for the scale —
-   * an acceptable approximation for a demo.
+   * falls back to the raw UI scale. Anisotropic pixel aspect ratios are ignored for the scale — an
+   * acceptable approximation for a demo.
    */
   fun toOverlayPlacement(
     transform: StickerTransform,

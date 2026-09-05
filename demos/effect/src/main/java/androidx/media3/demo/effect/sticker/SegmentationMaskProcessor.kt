@@ -53,8 +53,8 @@ internal object SegmentationMaskProcessor {
   class AlphaMask(val alpha: ByteArray, val width: Int, val height: Int, val bbox: Bbox?)
 
   /**
-   * A cutout: ARGB pixels of size [bbox].width x [bbox].height. [opaquePixelCount] is the number
-   * of non-transparent pixels — a cheap measure of the visible area, used to reject frames where
+   * A cutout: ARGB pixels of size [bbox].width x [bbox].height. [opaquePixelCount] is the number of
+   * non-transparent pixels — a cheap measure of the visible area, used to reject frames where
    * segmentation lost the subject.
    */
   class Cutout(val pixels: IntArray, val bbox: Bbox, val opaquePixelCount: Int)
@@ -111,9 +111,9 @@ internal object SegmentationMaskProcessor {
   }
 
   /**
-   * Returns the bounding box of the pixels with non-zero alpha in row-major ARGB [pixels], or
-   * null when every pixel is fully transparent. Used to trim transparent borders off stickers so
-   * their visible content can be placed flush against the video edges.
+   * Returns the bounding box of the pixels with non-zero alpha in row-major ARGB [pixels], or null
+   * when every pixel is fully transparent. Used to trim transparent borders off stickers so their
+   * visible content can be placed flush against the video edges.
    */
   fun opaqueBounds(pixels: IntArray, width: Int, height: Int): Bbox? {
     require(pixels.size == width * height) {

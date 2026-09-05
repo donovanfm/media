@@ -18,9 +18,9 @@ package androidx.media3.demo.effect.sticker
 import android.graphics.Bitmap
 
 /**
- * Returns this bitmap cropped to the tightest box containing all of its non-transparent pixels,
- * or the bitmap itself when there is nothing to trim (no transparent border, or no opaque pixels
- * at all).
+ * Returns this bitmap cropped to the tightest box containing all of its non-transparent pixels, or
+ * the bitmap itself when there is nothing to trim (no transparent border, or no opaque pixels at
+ * all).
  *
  * Sticker placement clamps the whole bitmap rect inside the video, so a transparent border stops
  * the visible content short of the video edges; trimming restores flush placement. Bundled assets

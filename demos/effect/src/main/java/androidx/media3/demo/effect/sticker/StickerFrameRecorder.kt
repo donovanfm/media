@@ -75,9 +75,9 @@ internal class StickerFrameRecorder(
 
   /**
    * Per-frame segmentation has no temporal consistency: an occasional frame loses the subject and
-   * returns a near-empty (or whole-frame) mask, which would bake a blank or flashing frame into
-   * the sticker. Frames whose visible area is far from the median of the accepted frames are
-   * rejected; playback timestamps naturally hold the previous frame across the gap.
+   * returns a near-empty (or whole-frame) mask, which would bake a blank or flashing frame into the
+   * sticker. Frames whose visible area is far from the median of the accepted frames are rejected;
+   * playback timestamps naturally hold the previous frame across the gap.
    */
   private fun isOutlier(opaquePixelCount: Int): Boolean {
     if (acceptedOpaqueCounts.size < MIN_FRAMES_FOR_OUTLIER_REJECTION) {
@@ -101,8 +101,8 @@ internal class StickerFrameRecorder(
      * Returns this animation cropped to the tightest box containing every frame's non-transparent
      * pixels. All frames are cropped by the same rect, so the frame size stays constant (stable
      * overlay anchoring) and the object's motion within the sticker is preserved — only borders
-     * that are transparent in EVERY frame are removed, letting the visible content reach the
-     * video edges during placement.
+     * that are transparent in EVERY frame are removed, letting the visible content reach the video
+     * edges during placement.
      */
     fun trimmedToOpaqueBounds(): ComposedAnimation {
       var union: SegmentationMaskProcessor.Bbox? = null
@@ -125,35 +125,34 @@ internal class StickerFrameRecorder(
   }
 
   /**
-   * Composes the recorded cutouts into constant-size frames, downscaled (nearest-neighbor) so
-   * that neither dimension exceeds [maxDimension]. Each cutout keeps its position within the
-   * union bounding box. The loop duration extends one average frame interval past the last frame.
-   * Returns null when nothing was recorded.
+   * Composes the recorded cutouts into constant-size frames, downscaled (nearest-neighbor) so that
+   * neither dimension exceeds [maxDimension]. Each cutout keeps its position within the union
+   * bounding box. The loop duration extends one average frame interval past the last frame. Returns
+   * null when nothing was recorded.
    */
   fun composeFrames(maxDimension: Int = DEFAULT_COMPOSE_MAX_DIMENSION): ComposedAnimation? {
     val union = unionBbox ?: return null
     val scale = min(1f, maxDimension.toFloat() / max(union.width, union.height))
     val outWidth = max(1, (union.width * scale).roundToInt())
     val outHeight = max(1, (union.height * scale).roundToInt())
-    val composedFrames =
-      frames.map { frame ->
-        val out = IntArray(outWidth * outHeight)
-        for (y in 0 until outHeight) {
-          val sourceY = union.top + min((y / scale).toInt(), union.height - 1)
-          if (sourceY < frame.bbox.top || sourceY > frame.bbox.bottom) {
-            continue
-          }
-          val frameRow = (sourceY - frame.bbox.top) * frame.bbox.width
-          val outRow = y * outWidth
-          for (x in 0 until outWidth) {
-            val sourceX = union.left + min((x / scale).toInt(), union.width - 1)
-            if (sourceX >= frame.bbox.left && sourceX <= frame.bbox.right) {
-              out[outRow + x] = frame.pixels[frameRow + sourceX - frame.bbox.left]
-            }
+    val composedFrames = frames.map { frame ->
+      val out = IntArray(outWidth * outHeight)
+      for (y in 0 until outHeight) {
+        val sourceY = union.top + min((y / scale).toInt(), union.height - 1)
+        if (sourceY < frame.bbox.top || sourceY > frame.bbox.bottom) {
+          continue
+        }
+        val frameRow = (sourceY - frame.bbox.top) * frame.bbox.width
+        val outRow = y * outWidth
+        for (x in 0 until outWidth) {
+          val sourceX = union.left + min((x / scale).toInt(), union.width - 1)
+          if (sourceX >= frame.bbox.left && sourceX <= frame.bbox.right) {
+            out[outRow + x] = frame.pixels[frameRow + sourceX - frame.bbox.left]
           }
         }
-        out
       }
+      out
+    }
     val baseTimestampUs = frames.first().timestampUs
     val timestampsUs = LongArray(frames.size) { frames[it].timestampUs - baseTimestampUs }
     val averageFrameIntervalUs =

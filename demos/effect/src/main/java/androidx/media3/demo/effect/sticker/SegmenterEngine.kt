@@ -59,8 +59,7 @@ internal class SegmenterEngine(
   class ConfidenceMask(val values: FloatBuffer, val width: Int, val height: Int)
 
   /** Wraps MediaPipe failures so callers can handle them without depending on MediaPipe types. */
-  class SegmentationException(message: String, cause: Throwable? = null) :
-    Exception(message, cause)
+  class SegmentationException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
   private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "SegmenterEngine") }
   private val dispatcher = executor.asCoroutineDispatcher()
@@ -77,8 +76,8 @@ internal class SegmenterEngine(
     private set
 
   /**
-   * Creates the segmenter if it doesn't exist yet, trying delegates in [DELEGATE_PREFERENCE]
-   * order: NPU first (the int8 model bundle is exactly what NPUs run best), then GPU, then CPU.
+   * Creates the segmenter if it doesn't exist yet, trying delegates in [DELEGATE_PREFERENCE] order:
+   * NPU first (the int8 model bundle is exactly what NPUs run best), then GPU, then CPU.
    * Idempotent. Throws [SegmentationException] when no delegate works.
    */
   suspend fun prepare() {
@@ -120,16 +119,16 @@ internal class SegmenterEngine(
    * mask. The point is submitted as a single-point positive brush stroke.
    *
    * Hardware inference is only initialized by the graph on the first segmentation — creating the
-   * segmenter with an NPU or GPU delegate can succeed on devices that can't actually run the
-   * model on that hardware (emulators, notably). A failure therefore advances to the next
-   * delegate in the chain and retries.
+   * segmenter with an NPU or GPU delegate can succeed on devices that can't actually run the model
+   * on that hardware (emulators, notably). A failure therefore advances to the next delegate in the
+   * chain and retries.
    *
    * Serialized on the engine thread, but the suspension itself is cancellable: wrapping a call in
    * `withTimeout` abandons the wait (the native call keeps running on the engine thread and its
    * eventual result is discarded), so a wedged native call can't hang the caller.
    *
-   * Throws [SegmentationException] on MediaPipe errors and [CancellationException] when the
-   * engine is closed or unprepared.
+   * Throws [SegmentationException] on MediaPipe errors and [CancellationException] when the engine
+   * is closed or unprepared.
    */
   suspend fun segment(frame: Bitmap, x: Float, y: Float): ConfidenceMask {
     return suspendCancellableCoroutine { continuation ->
@@ -228,8 +227,8 @@ internal class SegmenterEngine(
 
   /**
    * Normalizes the returned mask image to floats in [0, 1], accepting either a float
-   * (VEC32F1-style) or 8-bit alpha buffer. Always copies to the heap: the source buffer belongs
-   * to the mask image, which the caller closes immediately afterwards.
+   * (VEC32F1-style) or 8-bit alpha buffer. Always copies to the heap: the source buffer belongs to
+   * the mask image, which the caller closes immediately afterwards.
    */
   private fun toConfidenceMask(mask: MPImage): ConfidenceMask {
     val pixelCount = mask.width * mask.height

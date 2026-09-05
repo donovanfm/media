@@ -77,7 +77,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -285,8 +284,8 @@ class StickerCreationActivity : ComponentActivity() {
   }
 
   /**
-   * Long-press gestures shared by the photo and video surfaces: a long-press cuts a static
-   * sticker; in animated mode, holding records until the finger lifts, tracking it meanwhile.
+   * Long-press gestures shared by the photo and video surfaces: a long-press cuts a static sticker;
+   * in animated mode, holding records until the finger lifts, tracking it meanwhile.
    */
   private fun Modifier.segmentGestures(
     mode: StickerMode,
@@ -471,8 +470,8 @@ class StickerCreationActivity : ComponentActivity() {
   }
 
   /**
-   * Maps a pointer position on the aspect-sized video surface to normalized video coordinates.
-   * The surface has no letterbox bars, so its own dimensions act as the video dimensions for the
+   * Maps a pointer position on the aspect-sized video surface to normalized video coordinates. The
+   * surface has no letterbox bars, so its own dimensions act as the video dimensions for the
    * exact-fit mapping.
    */
   private fun PointerInputScope.mapToVideoPoint(position: Offset): NormalizedPoint? =

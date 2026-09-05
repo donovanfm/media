@@ -21,8 +21,8 @@ import java.io.File
 /**
  * A sticker image available for overlay placement.
  *
- * Stickers come from two sources: images bundled in the demo's assets, and custom stickers the
- * user cut out of a video with the creation screen, persisted in app-private storage by
+ * Stickers come from two sources: images bundled in the demo's assets, and custom stickers the user
+ * cut out of a video with the creation screen, persisted in app-private storage by
  * [StickerRepository].
  */
 internal sealed interface StickerAsset {
